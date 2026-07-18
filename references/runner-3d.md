@@ -205,7 +205,18 @@ function anyKey() { if (!assetsReady) return; /* ...原逻辑 */ }
 ## 验证方法
 
 - **机器人** `scripts/runner_bot.js`：找最近一排 → 算 blocked lanes → 护栏/横梁提前 0.45×速度 跳/滑、火车提前换道。120s 存活即证明刷怪公平
-- **WebGL 无头截图**：`chromium --headless=new --enable-unsafe-swiftshader --screenshot=...`
+- **CDP 等就绪截图** `scripts/cdp_shot.js`（需 `npm i chrome-remote-interface`）：驱动无头 chromium，等页面表达式为真（如 `assetsReady && tplReady()`）再截——`--virtual-time-budget` 会被 rAF 循环瞬间烧光，截到的永远是加载前
+- **注入式摆拍**：不等真实进程，直接注入状态定格画面验证特定元素：
+  ```js
+  newGame(); LG.speed = 0;   // 冻结速度
+  LG.obs.push({ lane:1, z:-20, type:"train", len:12, mesh:null });   // 障碍摆到眼前
+  ```
+- **两帧位移对比**：验证滚动方向/动画时，定速（如 `LG.speed=20`）连拍两帧，裁同一区域上下拼贴目检——A/B 面（左墙/右墙）必须分开各看一次
+- **连发体检**：同步 burst 模拟长时游玩抓 NaN/内存/异常（无头 fps 低，等时跑不到）：
+  ```js
+  for (let i = 0; i < 60*600; i++) { update(1/60); if (spd>0){ trackTex.offset.y+=…; updateSleepers(spd,DT); updateScenery(DT,spd); } updatePlayerMesh(); syncWorld(); }
+  scene.traverse(o => { /* 检查 matrixWorld 元素全部 isFinite、网格数无异常增长 */ });
+  ```
 - **快进注入**：与平台跳跃相同（同步 update(1/60)×N）
 
 ## 已知坑
