@@ -32,9 +32,10 @@ cd /tmp/fftest && python3 -m http.server <端口> &
 chromium --headless=new --no-sandbox --disable-gpu \
   --screenshot=<out.png> --window-size=430,932 http://localhost:<端口>/ff_22.html   # 竖屏
 # --window-size=1280,720 截横屏
+# 注意：macOS 无头 Chrome 最小窗口宽约 500px——竖屏验收用 --window-size=500,844，用 390 宽右缘会被裁掉
 ```
 
-逐张目检至少 5 张：标题页（文案不溢出）、游戏中段（地形/敌人/特效正常）、终点区（旗杆/建筑/台阶）、竖屏（世界贴底、HUD 完整）、横屏窗口（竖屏舞台居中、两侧留边）。
+逐张目检至少 5 张：标题页（文案不溢出）、游戏中段（地形/敌人/特效正常、主角与砖块比例符合 gdd.md 体型基线）、终点区（旗杆/建筑/台阶）、竖屏（世界贴底、HUD 完整）、横屏窗口（竖屏舞台居中、两侧留边）。
 
 ## 第 4 级：交付清单
 

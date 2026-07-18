@@ -91,7 +91,7 @@ function drawBoneShape(x, y, s) {
 }
 ```
 
-绘制时保持原图宽高比：`h = w * (im.naturalHeight / im.naturalWidth)`；角色/敌人锚定脚底中心；地形砖按 TILE×TILE 绘制。
+绘制时保持原图宽高比：`h = w * (im.naturalHeight / im.naturalWidth)`；角色/敌人锚定脚底中心；地形砖按 TILE×TILE 绘制。**标题页/结算页等展示位同样必须等比，禁止写死宽高硬拉伸**（竖高立绘硬拉进横宽框会直接压扁）。抠图/清理后目检内容包围盒：留白过多会让"按图高绘制"的角色视觉缩水，必须裁到内容边缘。
 
 ## 素材体积纪律
 

@@ -65,7 +65,11 @@ p.coyote = p.onGround ? 0.09 : Math.max(0, p.coyote - dt);   // 土狼时间
 p.buffer = Math.max(0, p.buffer - dt);
 if (press.jump) { p.buffer = 0.12; press.jump = false; }     // 跳跃缓冲
 if (p.buffer > 0 && p.coyote > 0) { p.vy = -JUMP_V; p.buffer = p.coyote = 0; }
-if (!jumpHeld && p.vy < -220) p.vy *= 0.55;                  // 松键截断（可变跳高）
+// 松键截断（可变跳高）：首选在 keyup/松键事件里执行，且只执行一次：
+//   onKeyUp(jump) { if (p.vy < 0) p.vy *= 0.55; }
+// 若写在 update 轮询，条件必须带速度阈值（vy < -220），截断一两次后自然失效；
+// 严禁 "vy < 0" 配轮询——每帧重复连乘会把跳跃直接"砍头"（实测：机器人上不了坑后浮台、卡死循环）。
+if (!jumpHeld && p.vy < -220) p.vy *= 0.55;
 ```
 
 加分项：起跳瞬间 `squash=-0.25`（拉长）、落地按下落速度 `squash=min(0.3, v/3200)`（压扁）、`squash *= Math.pow(0.001, dt)` 回弹；落地/跑动扬尘粒子。
