@@ -179,7 +179,16 @@ function anyKey() { if (!assetsReady) return; /* ...原逻辑 */ }
 - 不透明大图一律 JPG（天空 1.3MB PNG → 63KB JPG）；只有透明件保 PNG
 - 描边壳翻倍网格数：小点缀件（草簇）不加描边
 
-**兜底**：`renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); location.reload(); })`——有加载门重载才安全（玩家看到的还是进度条而不是半成品）。
+**兜底**（三层防御，缺一不可）：
+1. `webglcontextlost` 监听 → 进兼容模式重载；
+2. **渲染守卫**：主循环整体 try/catch，连续 3 帧异常 → 进兼容模式重载；
+3. **看门狗**：资源就绪后 90 帧仍 `renderer.info.render.calls === 0`（静默不渲染：不抛错但画布透明只剩底色）→ 进兼容模式重载。
+
+**兼容模式**（`localStorage.runner_safe=1`，渲染失败时自动写入并重载）：关 AA/阴影/描边、像素比 1。兼容模式仍失败 → 显示带 BUILD 号的错误页，**绝不静默蓝屏**。
+
+**BUILD 版本号上屏**（标题页角标）：用户报"还是丑/还是崩"时，先让截图里的 BUILD 号说话——确认用户跑的是不是最新版（预览链接/缓存会让用户一直玩旧版）。
+
+**"画布蓝屏但 DOM HUD 活着"的诊断顺序**：① GLB 数据体检（extensions/属性类型/interleaved，exotic 扩展在旧驱动上会崩）→ ② 连发模拟排逻辑/NaN → ③ 显存与上下文 → ④ 防御式降级。前三步都查不出时直接上 ④，别死磕远程复现。
 
 ## 验证方法
 

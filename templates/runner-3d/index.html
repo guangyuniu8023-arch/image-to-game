@@ -81,6 +81,24 @@
 <script src="GLTFLoader.js"></script>
 <script>
 "use strict";
+/* ================= 构建标记与兼容模式 =================
+   BUILD 上屏用于确认用户跑的是哪个版本；
+   渲染连续失败 → 自动打 runner_safe 标记重载进入兼容模式（关 AA/阴影/描边、像素比 1），
+   兼容模式仍失败 → 显示错误页，绝不静默蓝屏 */
+const BUILD = "b250718-4";
+const safeMode = (() => { try { return localStorage.getItem("runner_safe") === "1"; } catch (e) { return false; } })();
+function enterSafeMode() {
+  if (safeMode) { fatal("当前设备/浏览器无法运行 3D 画面，请更换浏览器或设备重试"); return; }
+  try { localStorage.setItem("runner_safe", "1"); } catch (e) {}
+  location.reload();
+}
+function fatal(msg) {
+  const el = document.getElementById("panel");
+  el.style.display = "flex";
+  el.innerHTML = '<div class="card"><div class="head">画面出错了</div>'
+    + '<div class="label" style="padding:24px 18px">' + msg + '<br><br>' + BUILD + '</div></div>';
+}
+
 /* ================= 输入 ================= */
 const keys = {};
 addEventListener("keydown", e => {
@@ -278,6 +296,7 @@ const boneTex = texLoader.load("bone.png");
 /* 卡通描边：反向放大壳 */
 const outlineMat = new THREE.MeshBasicMaterial({ color: 0x2a2320, side: THREE.BackSide });
 function outline(m, th = 1.045) {
+  if (safeMode) return m;                       // 兼容模式省一半网格
   const o = new THREE.Mesh(m.geometry, outlineMat);
   o.scale.set(th, th, th);
   o.raycast = () => {};
@@ -368,13 +387,15 @@ function initScene() {
   camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 400);
   camera.position.set(0, 4.1, 7.8);
   camera.lookAt(0, 1.35, -10);
-  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));   // 限制像素比，防手机 GPU 显存爆掉丢上下文（整屏只剩底色）
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: !safeMode, stencil: false });
+  } catch (e) { fatal("当前设备/浏览器不支持 3D 渲染，请更换浏览器重试"); throw e; }
+  renderer.setPixelRatio(safeMode ? 1 : Math.min(devicePixelRatio, 1.5));   // 限像素比，防手机 GPU 显存爆掉丢上下文（整屏只剩底色）
   renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.enabled = !safeMode;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  // 上下文丢失兜底：立即重载（有加载门，重载安全）
-  renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); location.reload(); });
+  // 上下文丢失兜底：立即进兼容模式重载
+  renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); enterSafeMode(); });
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x77aa55, 0.75));
   const sun = new THREE.DirectionalLight(0xfff5e0, 0.9);
@@ -836,11 +857,13 @@ function showPanel(kind) {
   if (!kind) { el.style.display = "none"; hud.style.display = "flex"; return; }
   hud.style.display = "none"; el.style.display = "flex";
   if (kind === "title") {
+    const verTag = '<div style="position:absolute;right:10px;bottom:8px;font-size:11px;color:#fff;opacity:.65;'
+      + 'text-shadow:0 1px 2px rgba(0,0,0,.3)">' + BUILD + (safeMode ? " · 兼容模式" : "") + '</div>';
     if (!assetsReady) {   // 资源加载中：Logo + 进度条
       const p = loadProgress();
       el.innerHTML = '<div class="logo">汪汪跑酷</div>'
         + '<div class="loadwrap"><div class="loadbar" id="loadbar" style="width:' + (p.done / p.total * 100) + '%"></div></div>'
-        + '<div class="tips" id="loadtxt">资源加载中 ' + p.done + ' / ' + p.total + '</div>';
+        + '<div class="tips" id="loadtxt">资源加载中 ' + p.done + ' / ' + p.total + '</div>' + verTag;
       return;
     }
     el.innerHTML = '<div class="logo">汪汪跑酷</div>'
@@ -848,7 +871,7 @@ function showPanel(kind) {
       + '<div class="stars"><img src="star.png"><img src="star.png"><img src="star_o.png"></div>'
       + '<img class="hero" src="puppy.png">'
       + '<div class="btn">▶ 开始游戏</div>'
-      + '<div class="tips">← → 换道　 ↑ 跳跃　 ↓ 滑铲<br>手机：左右滑换道 · 上滑跳 · 下滑铲</div>';
+      + '<div class="tips">← → 换道　 ↑ 跳跃　 ↓ 滑铲<br>手机：左右滑换道 · 上滑跳 · 下滑铲</div>' + verTag;
   } else if (kind === "over") {
     const starN = Math.min(3, 1 + Math.floor(LG.score / 4000));
     let stars = "";
@@ -872,24 +895,31 @@ function updateCamera() {
   camera.lookAt(px * 0.4, 1.35, -10);
 }
 
-/* ================= 主循环 ================= */
-let lastT = 0;
+/* ================= 主循环（带渲染守卫：连续失败自动进兼容模式） ================= */
+let lastT = 0, renderFails = 0, frames = 0;
 function loop(t) {
   requestAnimationFrame(loop);
   let dt = (t - lastT) / 1000; lastT = t;
   if (dt > 1 / 30) dt = 1 / 30;
   if (dt < 0) dt = 0;
-  update(dt);
-  const spd = LG.state === "play" ? (LG.slowT > 0 ? LG.speed * 0.45 : LG.speed) : 0;
-  if (spd > 0) {
-    trackTex.offset.y += spd * dt / 13.33;
-    updateScenery(dt, spd);
+  try {
+    update(dt);
+    const spd = LG.state === "play" ? (LG.slowT > 0 ? LG.speed * 0.45 : LG.speed) : 0;
+    if (spd > 0) {
+      trackTex.offset.y += spd * dt / 13.33;
+      updateScenery(dt, spd);
+    }
+    if (shakeT > 0) shakeT -= dt;
+    updatePlayerMesh();
+    syncWorld();
+    updateCamera();
+    renderer.render(scene, camera);
+    renderFails = 0;
+    // 渲染看门狗：资源就绪后 90 帧仍 0 个 drawcall = 静默不渲染（画布透明只剩底色）
+    if (assetsReady && ++frames === 90 && renderer.info.render.calls === 0) enterSafeMode();
+  } catch (e) {
+    if (++renderFails >= 3) enterSafeMode();
   }
-  if (shakeT > 0) shakeT -= dt;
-  updatePlayerMesh();
-  syncWorld();
-  updateCamera();
-  renderer.render(scene, camera);
 }
 
 /* ================= 启动 ================= */
