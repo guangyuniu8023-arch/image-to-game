@@ -1,0 +1,105 @@
+# 素材流水线：让全套素材"从图片里长出来"
+
+目标：用户给什么图，游戏素材就是什么主题、什么画风。全部以原图做风格参考 AI 生成，风格天然统一。
+
+## 目录
+
+- 素材清单（平台跳跃）
+- 主题映射表
+- 五步流水线
+- Prompt 模式
+- 角色序列帧（2D 左右移动游戏通用）
+- 回退注入模式
+- 失败处理
+
+## 素材清单（平台跳跃）
+
+| 素材 | 文件 | 生成方式 |
+|---|---|---|
+| 主角（2D 游戏） | puppy.png | remove_bg.py 抠图（不用 AI 生成，保真） |
+| 主角（3D 游戏） | 代码 | 纸片 sprite 违和时，改用程序化几何体复刻 IP 特征，见 [runner-3d.md](runner-3d.md) |
+| 收集物 | bone.png | AI 透明底 1:1 |
+| 敌人 | cat.png | AI 透明底 1:1 |
+| 障碍物 | hydrant.png | AI 透明底 1:1 |
+| 终点建筑 | doghouse.png | AI 透明底 1:1 |
+| 地形砖 ×6 | tile_grass/dirt/brick/q/used/stair.png | AI 透明底 1:1 |
+| 背景 | bg.png | AI 不透明 3:2 1K |
+
+地形砖清单：草地砖（地表）、素泥土砖（地下）、砖块、? 砖、顶过的砖、台阶石。
+
+## 主题映射表
+
+| 主角 | 收集物 | 敌人 | 障碍物 | 终点 |
+|---|---|---|---|---|
+| 狗 | 骨头 | 生气猫 | 消防栓 | 狗屋 |
+| 猫 | 鱼干 | 凶狗 | 毛线球 | 猫窝 |
+| 兔子 | 胡萝卜 | 狐狸 | 栅栏 | 兔窝 |
+| 人/其他 | 星星/相关物 | 史莱姆 | 石柱 | 房子/城堡 |
+
+## 五步流水线
+
+1. **抠主角**：`python3 scripts/remove_bg.py <原图> <主角.png>`
+2. **取主色**：`python3 scripts/extract_palette.py <主角.png>`，主色用于 UI 点缀配色参考。
+3. **传参考图**：`image_generation_tool.py image-to-url --image-path <主角.png>` 拿公开 URL。
+4. **批量生成**（每个素材一条命令，可并行但注意用绝对路径）：
+   ```bash
+   image_generation_tool.py generate \
+     --description "<物件描述>, kawaii children's book illustration style, thick dark brown outline, soft flat colors, matching the art style of the reference image, isolated single object" \
+     --ratio "1:1" --background "transparent" --reference-image "<URL>" --output <素材.png>
+   ```
+   背景图用：`--ratio "3:2" --resolution "1K" --background "opaque"`，描述结尾加 `no platforms, no blocks, no bricks, no floating islands, no characters, no animals, no text, no watermark`。
+5. **清理**：`python3 scripts/clean_sprite.py <原素材.png> <成品.png>` 去水印碎块+裁剪；背景图（不透明）直接裁掉底部 9% 条带去水印。处理完**必须目检**。
+
+## Prompt 模式
+
+- 风格锚点固定写法：`kawaii children's book illustration style, thick dark brown outline, soft flat colors, matching the art style of the reference image`
+- 物件：一句话说清本体 + 视角（front view）+ `isolated single object`
+- 用户图是别的画风（像素/写实/扁平）就换风格锚点，保持全套一致
+- 透明底只支持 1:1 / 3:2 / 2:3 的 1K PNG
+
+## 角色序列帧（2D 左右移动游戏通用）
+
+**凡是 2D 且角色会左右移动的游戏，奔跑状态必须有序列帧（每状态 4 帧）**；跳跃/站立/受伤等其他状态用静态图即可。2 帧会明显顿挫，4 帧才流畅。
+
+**循环结构必须是 A→B→C→A：最后一帧与第一帧完全相同**（中间两帧是运动过渡），否则播到末尾跳回开头时会"咯噔"一下。第 4 帧不要靠 AI 画"一样的"，直接用代码复制第 1 帧（确定性）；AI 只需产出 3 个不同姿势。
+
+**一张 2×2 图出 4 帧**（一张图内一致性远好于分 4 次生成，且只调一次 API）：
+
+1. **生成**（以抠图主角为风格参考）：
+   ```bash
+   image_generation_tool.py generate \
+     --description "2x2 sprite sheet of <主角描述> running, 4 cells arranged in an even 2x2 grid with equal spacing, each cell contains the same character in side view facing right in a different run-cycle pose: top-left full stride, top-right gathered mid-air, bottom-left opposite stride, bottom-right pushing off the ground, <风格锚点>, each fully inside its own grid cell, no overlapping, no grid lines, no text, no watermark" \
+     --ratio "1:1" --background "transparent" --reference-image "<URL>" --output sheet.png
+   ```
+2. **去水印**：`clean_sprite.py sheet.png sheet_clean.png`。注意它会按内容包围盒**整体裁剪**，之后必须按清理后的新尺寸切。
+3. **切帧**：`slice_sheet.py sheet_clean.png <主角>_run --order tl,tr,br,bl`（按运动链指定格子顺序，如"伸展跨步→收腿腾空→落地发力"），得 `<主角>_run1..4.png`。
+4. **首尾闭环**：选出运动链的 3 帧作为 run1/2/3 后，`cp run1 run4`——第 4 帧是第 1 帧的复制品，保证循环无跳变。
+5. **拼接目检 4 帧**（必须）：整体裁剪后象限中线可能偏移，角色被切断就调整 --order 或重新生成。
+
+播放代码模式见 [game-patterns.md](game-patterns.md) 的"跑步序列帧动画"。
+
+## 回退注入模式
+
+每个素材加载后先检查、失败走代码手绘，游戏永不白屏：
+
+```js
+const boneImg = new Image(); boneImg.src = "bone.png";
+const imgReady = im => im.complete && im.naturalWidth > 0;
+function drawBoneShape(x, y, s) {
+  if (imgReady(boneImg)) { /* drawImage 按原图宽高比绘制 */ return; }
+  /* …程序化手绘回退… */
+}
+```
+
+绘制时保持原图宽高比：`h = w * (im.naturalHeight / im.naturalWidth)`；角色/敌人锚定脚底中心；地形砖按 TILE×TILE 绘制。
+
+## 素材体积纪律
+
+AI 生成的 PNG 单张常在 1MB 上下，全套素材很容易到 10MB 级——手机网络下加载要十几秒，加载门的等待会直接被玩家感知。约束：素材总量控制在 ~5MB 内；不透明大图（背景、地形砖）优先导出时压尺寸/转 JPG 或 WebP；透明小件保持 PNG。
+
+## 失败处理
+
+- HTTP 424（服务暂时不可用）：sleep 20-30s 重试；2K 反复失败就降 1K。
+- 背景画出"假平台/假砖块"误导玩家：重新生成，prompt 加 no platforms / no blocks。
+- 抠图后为空：容差调小；背景太复杂就换 AI 生成主角（描述尽量贴合原图特征）。
+- 单个素材风格跑偏：只重新生成那一个，prompt 里补一句与其他素材一致的具体特征。
