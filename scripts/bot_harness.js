@@ -2,8 +2,9 @@
 /**
  * 无头机器人通关测试：验证平台跳跃游戏的关卡"确实可通关"。
  *
- * 用法: node bot_harness.js <index.html> [最长模拟秒数=180]
- * 退出码: 0 = 通关（WIN: true）；1 = 未通关 / 出错
+ * 用法: node bot_harness.js <index.html> [最长模拟秒数=180] [--lenient]
+ * 退出码: 0 = 通关且完整性断言通过；1 = 未通关 / 断言失败 / 出错
+ *         --lenient: 完整性断言降级为警告(仅用于 GDD 已声明简化的实验项目)
  *
  * 原理: 提取 HTML 内联 <script> 块，前面注入浏览器 API 桩，后面接机器人
  *       代码，拼成一个 Node 模块执行。机器人按住右方向键，遇墙/悬崖/敌人
@@ -20,6 +21,7 @@ const path = require("path");
 
 const htmlPath = process.argv[2];
 const MAXSEC = Number(process.argv[3] || 180);
+const LENIENT = process.argv.includes("--lenient");
 if (!htmlPath) {
   console.error("用法: node bot_harness.js <index.html> [最长秒数]");
   process.exit(1);
@@ -55,6 +57,48 @@ const BOT = `
     process.exit(1);
   }
   newGame();
+
+  // ===== 关卡完整性断言(gdd.md 分段配方的强制校验)=====
+  // 在 newGame() 后、游玩前扫描 grid 与实体表:长度/?砖/砖块群/水管/台阶/浮台/敌/收集物
+  const LENIENT = ${LENIENT};
+  function audit() {
+    const issues = [];
+    let Tmap = null, cols = 0;
+    try { Tmap = eval("T"); } catch (e) {}
+    try { cols = eval("COLS"); } catch (e) {}
+    if (cols && cols < 200) issues.push("关卡长度 " + cols + " 列 < 规范 200(gdd.md 分段配方总长 200~220)");
+    if (Tmap && cols) {
+      const cnt = {};
+      for (let c = 0; c < cols; c++) for (let r = 0; r < ROWS; r++) {
+        const t = tileAt(c, r);
+        cnt[t] = (cnt[t] || 0) + 1;
+      }
+      const n = (k) => cnt[Tmap[k]] || 0;
+      const need = [["Q", "问号砖", 4, "(顶砖机制缺失=流程减配)"], ["BRICK", "砖块群", 5, ""],
+                    ["PIPE", "水管", 2, ""], ["STAIR", "台阶", 12, "(金字塔+终点大台阶)"], ["PLAT", "单向浮台", 2, ""]];
+      for (const [k, label, min, note] of need) {
+        if (Tmap[k] === undefined) { issues.push(label + "机制未实现(瓦片类型 T." + k + " 不存在)"); continue; }
+        if (n(k) < min) issues.push(label + " " + n(k) + " 个 < 规范 ≥" + min + note);
+      }
+    }
+    let collect = null;
+    for (const nm of ["coins", "bones", "collects", "stars"]) {
+      try { const v = eval(nm); if (Array.isArray(v)) { collect = v; break; } } catch (e) {}
+    }
+    if (collect && (collect.length < 50 || collect.length > 70))
+      issues.push("收集物 " + collect.length + " 个,规范 50~70");
+    if (enemies.length < 12 || enemies.length > 18)
+      issues.push("敌人 " + enemies.length + " 只,规范 12~18");
+    return issues;
+  }
+  const auditIssues = audit();
+  if (auditIssues.length) {
+    console.log("完整性断言: " + (LENIENT ? "WARN(实验简化模式)" : "FAIL"));
+    auditIssues.forEach((i) => console.log("  - " + i));
+  } else {
+    console.log("完整性断言: 全部通过");
+  }
+
   const DT = 1 / 60;
   const groundAhead = () => {
     const c = Math.floor((player.x + player.w + 12) / TILE);
@@ -87,7 +131,8 @@ const BOT = `
     if (G.state === "gameover") break;
   }
   const stomps = enemies.filter((e) => !e.alive && (e.squash === undefined || e.squash < 90)).length;
-  console.log("WIN: " + win);
+  const auditOk = auditIssues.length === 0 || LENIENT;
+  console.log("WIN: " + (win && auditOk));
   console.log("state=" + G.state
     + " 最远列=" + (maxX / TILE).toFixed(1)
     + " 收集=" + (G.bones !== undefined ? G.bones : "-")
@@ -95,7 +140,7 @@ const BOT = `
     + " 剩余生命=" + G.lives + " 死亡=" + deaths
     + " 踩敌=" + stomps + "/" + enemies.length
     + " 耗时=" + ((Date.now() - t0) / 1000).toFixed(1) + "s");
-  process.exit(win ? 0 : 1);
+  process.exit(win && auditOk ? 0 : 1);
 })();
 `;
 

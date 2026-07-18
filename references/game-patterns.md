@@ -11,8 +11,8 @@
 - 相机与视差背景
 - 跑步序列帧动画
 - 竖屏锁定布局
-- 触控按钮
 - WebAudio 合成音效
+- 触屏与输入（指针 → controls.md）
 
 ## 文件与代码结构
 
@@ -162,15 +162,6 @@ function layout() {
 
 相机、瓦片裁剪一律用 `VIEW_W` 而不是 W。`addEventListener("resize", layout)` 支持旋转屏幕。
 
-## 触控按钮
-
-```html
-<div class="tbtn" id="btnJ">跳</div>
-<style>@media (pointer: coarse) { .tbtn { display: flex; } }</style>
-```
-
-pointerdown/up/leave/cancel 四个事件都要绑；按下写入与键盘相同的 `keys`/`press`，游戏逻辑零改动。
-
 ## WebAudio 合成音效
 
 ```js
@@ -187,63 +178,6 @@ function beep(freq, dur, type="square", vol=0.15, slide=0) {
 
 配方：跳跃 `beep(320,.18,"square",.12,500)`；收集 900→1350 两个正弦连音；踩敌 `beep(220,.15,"square",.18,-160)`；顶砖 `beep(140,.08)`；死亡 `beep(500,.5,"sawtooth",.12,-420)`；通关 523/659/784/1047 四音琶音（间隔 130ms）。注意 AudioContext 必须在首次用户手势后创建。
 
-## 触屏输入通用策略（移动端优先，所有游戏必须）
+## 触屏与输入
 
-游戏最终都在手机上玩：触屏可玩是硬要求。本策略分三层：**设备检测 → 语义输入 → 输入模式**。操控方案按**输入维度**推导，不按游戏类型查表——新类型只声明输入维度即可继承现成方案，不为单个类型定制。
-
-### 第 1 层：设备检测（环境守卫，bot 桩环境无 `navigator`/`location`，一律 `typeof` 守卫）
-
-```js
-const IS_TOUCH = (typeof window !== "undefined" && "ontouchstart" in window)
-              || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
-              || (typeof location !== "undefined" && /[?&]touch=1/.test(location.search)); // 桌面调试触屏布局
-// 文案：IS_TOUCH ? 触屏版 : 键盘+触屏版；桌面端虚拟键 display:none
-```
-
-说明文案按设备自适应：**触屏设备只显示触屏说明，桌面端显示键盘+触屏两套**。
-
-### 第 2 层：语义输入层（游戏逻辑与设备解耦）
-
-游戏逻辑只消费**语义输入**——`moveX ∈ [-1,1]`、`action`（按下/松开两个事件）、`pointer`（点选/拖拽坐标）。键盘、虚拟键、陀螺仪、半屏按压都只是语义输入的**来源**，在输入合成处汇流（多来源取绝对值最大者）。禁止游戏逻辑直接读 `keyCode`/触摸事件，否则每加一种设备就要改一遍游戏逻辑。
-
-### 第 3 层：输入模式推导（声明输入维度 → 落到模式 → 继承方案）
-
-| 游戏需要的输入维度 | 模式 | 触屏方案 | 已验证类型 |
-|---|---|---|---|
-| 离散方向（左右）+ 瞬时动作（跳/打），动作需要"按住时长"语义 | **A 键区** | 虚拟键区：左下方向键、右下动作键（见下） | 横版过关 |
-| 单轴连续量（倾斜/平移 ∈ [-1,1]） | **B 连续轴** | 陀螺仪倾斜为主 + 半屏按压回退（见下） | 竖版弹跳 |
-| 点选/拖拽离散对象（棋子、卡牌、塔位） | **C 直指** | 原生 touch 点选/拖动，无需虚拟控件；"鼠标"措辞仅桌面显示 | 消消乐 |
-
-维度组合时各轴独立落模式（如"移动+瞄准"= A + 右半屏虚拟摇杆）。三个模式覆盖不了的新维度，先回 new-type.md 推演定义清楚输入维度再选方案，**不许为某个类型临时发明一次性方案**。
-
-### 模式 A：虚拟键区实现规范
-
-按键 ≥88px 放拇指热区（屏幕下 1/3），动作键大于方向键（如 116px vs 96px），半透明（opacity .45、按下 .7），容器 `touch-action:none` 防手势冲突；**多点触控**按 `touch.identifier` 跟踪，支持"按住方向同时跳"；按键映射到与键盘同一语义变量，**松开触发与 keyup 完全相同的逻辑**（如跳跃的可变跳高截断，见"跳跃手感三件套"）；桌面端隐藏、键盘照常。
-
-```js
-function bindBtn(el, key) {
-  const on  = e => { e.preventDefault(); el.classList.add("on"); keys[key] = true;
-                     if (key === "jump") press.jump = true; };
-  const off = e => { e.preventDefault(); el.classList.remove("on");
-                     if (key === "jump" && keys.jump) onJumpRelease(); // 与 keyup 同一截断
-                     keys[key] = false; };
-  el.addEventListener("touchstart", on, {passive:false});
-  el.addEventListener("touchend", off); el.addEventListener("touchcancel", off);
-  el.addEventListener("mousedown", on); el.addEventListener("mouseup", off); // 桌面调试
-}
-```
-
-### 模式 B：陀螺仪 + 半屏回退实现规范
-
-```js
-// 首次用户手势时请求权限（iOS 13+ 必须手势内调用）；拒绝/不支持 → 静默回退半屏按压
-async function enableTilt() {
-  if (typeof DeviceOrientationEvent?.requestPermission === "function") {
-    try { if (await DeviceOrientationEvent.requestPermission() !== "granted") return; } catch (e) { return; }
-  }
-  window.addEventListener("deviceorientation", e => { tilt = clamp(e.gamma / 25, -1, 1); });
-}
-// 输入合成：moveX = (keys.left?-1:0) + (keys.right?1:0)，再与 tilt 取绝对值最大者
-```
-
-文案示例（模式 A 类型）：触屏设备"◀ ▶ 移动 · 按住跳键跳跃（长按更高）· 踩怪 +200"；桌面"←→/AD 移动 · 空格/W/↑ 跳 · R 重开 · 触屏可用虚拟键"。
+触屏默认、语义输入、输入模式推导（虚拟键区/陀螺仪/直指）——全部见通用策略 [controls.md](controls.md)，本文件不再重复。平台跳跃只需声明：输入维度 = 离散方向 + 瞬时动作（跳），落**模式 A 虚拟键区**；跳跃键松开复用"跳跃手感三件套"的可变跳高截断。
