@@ -5,6 +5,7 @@
 ## 目录
 
 - 素材清单（平台跳跃）
+- 角色图驱动策略（特征提取→定制→验收）
 - 素材设计规范（2D 平台跳跃）
 - 主题映射表
 - 五步流水线
@@ -12,6 +13,30 @@
 - 角色序列帧（2D 左右移动游戏通用）
 - 回退注入模式
 - 失败处理
+
+## 角色图驱动策略：让素材"是这个角色的世界"
+
+目标：玩家一眼觉得全套素材与角色图是"一家的"，而不是通用素材库。四步：
+
+1. **角色特征提取表**（看角色图必填，结论写进 GDD）：
+   - 形态类别：两足竖高 / 四足横宽 / 其他 → 决定主角尺寸基线（见 gdd.md 与"素材设计规范"）
+   - 画风：赛璐璐动漫 / kawaii 绘本 / 像素 / 扁平矢量 / 厚涂写实 → 决定风格锚点写法（见下表）
+   - 主色 + 点缀色：`extract_palette.py` 取色 → UI 令牌与全套素材配色倾向
+   - **标志性元素**：配饰/道具/图案（心形腰包、耳机、武器、宠物）→ 收集物与终点建筑的定制线索
+   - 性格/世界观暗示：服装风格、年代感、身份 → 敌人/障碍/背景的主题线索
+2. **主题定制**：默认按"主题映射表"；但只要角色有明显的标志性元素，收集物/终点建筑**优先换成角色元素**（例：心形腰包 → 爱心收集物），并在 GDD 写明替换理由——默认映射项只在无线索时使用。
+3. **每条 prompt 必含四件**：物件本体 + 视角（见"素材设计规范"）+ 风格锚点（按画风从下表换写法）+ 1-2 个角色特征引用（如 "in the world of an orange twin-tails anime girl, heart motifs"）；并始终带角色图参考 URL。
+4. **一致性验收**：全套素材与角色图**并排拼一张 contact sheet** 目检——描边粗细、上色方式、明暗方向、配色家族一致，像"这个角色世界里的东西"；单件跑偏只重新生成那一件。
+
+**风格锚点速查**（替换"Prompt 模式"的默认锚点，全套统一用一个）：
+
+| 画风 | 锚点写法 |
+|---|---|
+| 赛璐璐动漫 | Japanese anime cel-shading, clean line art, vibrant flat colors |
+| kawaii 绘本（默认） | kawaii children's book illustration style, thick dark brown outline, soft flat colors |
+| 像素 | 16-bit pixel art, limited palette, crisp pixels, no anti-aliasing |
+| 扁平矢量 | flat vector illustration, geometric shapes, bold solid colors |
+| 厚涂/写实 | painterly concept art, soft brush strokes, cinematic lighting |
 
 ## 素材清单（平台跳跃）
 
