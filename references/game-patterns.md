@@ -186,3 +186,52 @@ function beep(freq, dur, type="square", vol=0.15, slide=0) {
 ```
 
 配方：跳跃 `beep(320,.18,"square",.12,500)`；收集 900→1350 两个正弦连音；踩敌 `beep(220,.15,"square",.18,-160)`；顶砖 `beep(140,.08)`；死亡 `beep(500,.5,"sawtooth",.12,-420)`；通关 523/659/784/1047 四音琶音（间隔 130ms）。注意 AudioContext 必须在首次用户手势后创建。
+
+## 触屏操控规范（移动端优先，所有游戏必须）
+
+游戏最终都在手机上玩：触屏可玩是硬要求，说明文案按设备自适应——**触屏设备只显示触屏说明，桌面端显示键盘+触屏两套**。
+
+```js
+const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+// 文案：IS_TOUCH ? 触屏版 : 键盘+触屏版；桌面端虚拟键 display:none
+```
+
+### 各类型操控映射
+
+| 类型 | 默认方案 | 备选 |
+|---|---|---|
+| 横版过关（移动+跳） | **虚拟三键**：左下 ◀▶、右下大跳键（长按跳更高） | 半屏按压移动 + 上滑手势跳 |
+| 竖版弹跳（doodle jump 类） | 半屏按压左右 + **陀螺仪倾斜** | — |
+| 消除/益智 | 原生点选/拖动（"鼠标"措辞仅桌面显示） | — |
+
+### 虚拟三键代码模式
+
+按键 ≥88px 放拇指热区（屏幕下 1/3），半透明（opacity .45、按下 .7），容器 `touch-action:none` 防手势冲突；**多点触控**按 `touch.identifier` 跟踪，支持"按住方向同时跳"；跳键映射到与键盘同一状态变量，**松开触发与 keyup 完全相同的可变跳高截断**（见"跳跃手感三件套"）；桌面端隐藏、键盘照常。
+
+```js
+function bindBtn(el, key) {
+  const on  = e => { e.preventDefault(); el.classList.add("on"); keys[key] = true;
+                     if (key === "jump") press.jump = true; };
+  const off = e => { e.preventDefault(); el.classList.remove("on");
+                     if (key === "jump" && keys.jump) onJumpRelease(); // 与 keyup 同一截断
+                     keys[key] = false; };
+  el.addEventListener("touchstart", on, {passive:false});
+  el.addEventListener("touchend", off); el.addEventListener("touchcancel", off);
+  el.addEventListener("mousedown", on); el.addEventListener("mouseup", off); // 桌面调试
+}
+```
+
+### 陀螺仪（竖版弹跳类）
+
+```js
+// 首次用户手势时请求权限（iOS 13+ 必须手势内调用）
+async function enableTilt() {
+  if (typeof DeviceOrientationEvent?.requestPermission === "function") {
+    try { if (await DeviceOrientationEvent.requestPermission() !== "granted") return; } catch (e) { return; }
+  }
+  window.addEventListener("deviceorientation", e => { tilt = clamp(e.gamma / 25, -1, 1); });
+}
+// 输入合成：move = (keys.left?-1:0) + (keys.right?1:0)，再与 tilt 取绝对值最大者
+```
+
+文案示例（横版过关）：触屏设备"◀ ▶ 移动 · 按住跳键跳跃（长按更高）· 踩怪 +200"；桌面"←→/AD 移动 · 空格/W/↑ 跳 · R 重开 · 触屏可用虚拟键"。
