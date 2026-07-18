@@ -78,6 +78,7 @@
 <div id="panel"></div>
 </div>
 <script src="three.min.js"></script>
+<script src="GLTFLoader.js"></script>
 <script>
 "use strict";
 /* ================= 输入 ================= */
@@ -267,7 +268,7 @@ function updateLoadingUI() {
   if (assetsReady && LG.state === "title") showPanel("title");
 }
 loadMgr.onProgress = (u, done, total) => { texDone = done; texTotal = total; updateLoadingUI(); };
-loadMgr.onLoad = () => updateLoadingUI();
+loadMgr.onLoad = () => { buildScenery(); updateLoadingUI(); };   // GLB 全部就绪后再建远景
 for (const src of domAssets) {
   const im = new Image();
   im.onload = im.onerror = () => { imgDone++; updateLoadingUI(); };
@@ -283,6 +284,74 @@ function outline(m, th = 1.045) {
   m.add(o);
   return m;
 }
+
+/* ================= 外部模型库（Quaternius，CC0） =================
+   全部经 loadMgr 加载（并入加载门进度条）；加载后统一：
+   转 Lambert 平光 + 描边 + 归一化（高=1 或 宽=1，锚点=底部中心）存为模板，游戏中 clone 使用 */
+const gltfLoader = THREE.GLTFLoader ? new THREE.GLTFLoader(loadMgr) : null;   // 无 GLTFLoader 时回退程序化建模
+const TPL = {};            // name → { g: 原型组, dims: Vector3(归一化后尺寸) }
+const MODEL_FILES = [
+  "Tree1", "Tree2", "Tree3", "Tree4", "Bush1", "Bush2", "Bush3", "Rock1", "Rock2", "Grass1",
+  "House", "House2", "House4", "House5",
+  "Fence", "Fence2",
+  "CargoTrain_Front", "CargoTrain_Wagon", "CargoTrain_Container",
+];
+const NO_OUTLINE = { Grass1: 1 };        // 太小的物件描边是噪点
+const HOUSE_TEX = { House: "HouseTexture1", House2: "HouseTexture2", House4: "HouseTexture4", House5: "HouseTexture1" };
+const RECOLOR = { Rock: new THREE.Color(0.36, 0.34, 0.31) };   // 石头原色太黑，提亮
+const TRAIN_W = 1.9;       // 火车占道宽
+const TREES = ["Tree1", "Tree2", "Tree3", "Tree4"];
+const HOUSES = ["House", "House2", "House4", "House5"];
+const DECO = ["Bush1", "Bush2", "Bush3", "Rock1", "Rock2"];
+const NEAR = ["Grass1", "Grass1", "Bush1", "Bush3", "Rock1", "Rock2"];   // 近轨点缀带
+
+function prepModel(name, gltf, normMode) {
+  const root = gltf.scene;
+  const meshes = [];
+  root.traverse(m => { if (m.isMesh) meshes.push(m); });   // 先收集：traverse 回调里 add 会死循环
+  for (const m of meshes) {
+    const src = m.material;
+    const mat = new THREE.MeshLambertMaterial({
+      color: src.color ? src.color.clone() : 0xffffff,
+      name: src.name || "",
+    });
+    if (HOUSE_TEX[name]) {                     // 房子：手动配 32px 调色板贴图（门窗立面）
+      const t = texLoader.load("models/" + HOUSE_TEX[name] + ".png");
+      t.flipY = false; t.encoding = THREE.sRGBEncoding;
+      mat.map = t;
+    }
+    if (RECOLOR[mat.name]) mat.color.copy(RECOLOR[mat.name]);
+    m.material = mat;
+    m.castShadow = true;
+    if (!NO_OUTLINE[name]) outline(m);
+  }
+  // 火车：长轴对齐 z（游戏前进轴），宽轴留 x
+  let box = new THREE.Box3().setFromObject(root);
+  let size = new THREE.Vector3(); box.getSize(size);
+  if (normMode === "train" && size.x > size.z) {
+    root.rotation.y = Math.PI / 2;
+    box = new THREE.Box3().setFromObject(root);
+    box.getSize(size);
+  }
+  // 归一化：树房栅栏按高=1；火车按宽=1。锚点移到"底部中心"
+  const ref = normMode === "h" ? size.y : size.x;
+  const s = 1 / (ref || 1);
+  root.scale.set(s, s, s);
+  const b2 = new THREE.Box3().setFromObject(root);
+  root.position.set(-(b2.min.x + b2.max.x) / 2, -b2.min.y, -(b2.min.z + b2.max.z) / 2);
+  const wrap = new THREE.Group(); wrap.add(root);
+  const dims = new THREE.Vector3(); b2.getSize(dims);
+  TPL[name] = { g: wrap, dims };
+}
+if (gltfLoader) {
+  for (const f of MODEL_FILES) {
+    gltfLoader.load("models/" + f + ".glb",
+      g => prepModel(f, g, f.startsWith("CargoTrain") ? "train" : "h"),
+      undefined,
+      err => console.warn("模型加载失败", f, err));
+  }
+}
+const tplReady = () => MODEL_FILES.every(f => TPL[f]);
 
 function makeCanvas(w, h, draw) {
   const cv2 = document.createElement("canvas");
@@ -300,10 +369,12 @@ function initScene() {
   camera.position.set(0, 4.1, 7.8);
   camera.lookAt(0, 1.35, -10);
   renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));   // 限制像素比，防手机 GPU 显存爆掉丢上下文（整屏只剩底色）
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // 上下文丢失兜底：立即重载（有加载门，重载安全）
+  renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); location.reload(); });
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x77aa55, 0.75));
   const sun = new THREE.DirectionalLight(0xfff5e0, 0.9);
@@ -315,25 +386,37 @@ function initScene() {
   sun.shadow.camera.near = 1; sun.shadow.camera.far = 60;
   scene.add(sun); scene.add(sun.target);
 
-  // 轨道地面：一张程序绘制的贴图（道砟+枕木+钢轨），滚动模拟前进
+  // 轨道地面：512px 程序贴图（暖道砟+木枕+亮钢轨），滚动模拟前进
   const laneU = x => (x + 4.4) / 8.8;
-  const cvTrack = makeCanvas(256, 256, (g) => {
-    g.fillStyle = "#8a7a6a"; g.fillRect(0, 0, 256, 256);          // 道砟
-    g.fillStyle = "rgba(0,0,0,.12)";
-    for (let i = 0; i < 40; i++) g.fillRect(Math.random()*256, Math.random()*256, 6, 5);
-    g.fillStyle = "#6b4f35";                                       // 枕木
-    for (let y = 0; y < 256; y += 21) g.fillRect(14, y, 228, 9);
-    g.fillStyle = "#cfd6da";                                       // 钢轨
-    for (const lx of LANES) for (const s of [-0.5, 0.5]) {
-      const u = laneU(lx + s) * 256;
-      g.fillRect(u - 3, 0, 6, 256);
-      g.fillStyle = "#9aa4a8"; g.fillRect(u - 3, 0, 2, 256);
-      g.fillStyle = "#cfd6da";
+  const cvTrack = makeCanvas(512, 512, (g) => {
+    g.fillStyle = "#a5907a"; g.fillRect(0, 0, 512, 512);            // 道砟底（暖浅棕）
+    for (let i = 0; i < 14; i++) {                                   // 大块明暗变化，破单调
+      g.fillStyle = i % 2 ? "rgba(0,0,0,.05)" : "rgba(255,255,255,.06)";
+      g.beginPath(); g.arc(Math.random() * 512, Math.random() * 512, 30 + Math.random() * 60, 0, 7); g.fill();
+    }
+    for (let i = 0; i < 260; i++) {                                  // 碎石子
+      g.fillStyle = "rgba(0,0,0," + (0.05 + Math.random() * 0.08) + ")";
+      g.fillRect(Math.random() * 512, Math.random() * 512, 3 + Math.random() * 5, 2 + Math.random() * 4);
+    }
+    for (let i = 0; i < 140; i++) {
+      g.fillStyle = "rgba(255,255,255,.09)";
+      g.fillRect(Math.random() * 512, Math.random() * 512, 3, 2);
+    }
+    for (let y = 4; y < 512; y += 38) {                              // 枕木（暖木+受光面+端影）
+      g.fillStyle = "#7d5f42"; g.fillRect(26, y, 460, 16);
+      g.fillStyle = "#93744f"; g.fillRect(26, y, 460, 5);
+      g.fillStyle = "rgba(0,0,0,.16)"; g.fillRect(26, y + 13, 460, 3);
+    }
+    for (const lx of LANES) for (const s of [-0.5, 0.5]) {           // 钢轨（亮钢+高光+暗边）
+      const u = laneU(lx + s) * 512;
+      g.fillStyle = "#e6ebee"; g.fillRect(u - 5, 0, 10, 512);
+      g.fillStyle = "#ffffff"; g.fillRect(u - 5, 0, 3, 512);
+      g.fillStyle = "rgba(0,0,0,.2)"; g.fillRect(u + 3, 0, 2, 512);
     }
   });
   trackTex = new THREE.CanvasTexture(cvTrack);
   trackTex.wrapS = trackTex.wrapT = THREE.RepeatWrapping;
-  trackTex.repeat.set(1, 30);
+  trackTex.repeat.set(1, 15);
   const track = new THREE.Mesh(
     new THREE.PlaneGeometry(8.8, 400),
     new THREE.MeshLambertMaterial({ map: trackTex })
@@ -342,21 +425,30 @@ function initScene() {
   track.receiveShadow = true;
   scene.add(track);
 
-  // 两侧草地（小碎花纹理）
-  const grassTex = new THREE.CanvasTexture(makeCanvas(256, 256, (g) => {
-    g.fillStyle = "#96cf70"; g.fillRect(0, 0, 256, 256);
-    g.fillStyle = "#8bc465";
-    for (let i = 0; i < 30; i++) g.fillRect(Math.random() * 256, Math.random() * 256, 5, 3);
-    g.fillStyle = "rgba(255,255,255,.14)";
-    for (let i = 0; i < 50; i++) g.fillRect(Math.random() * 256, Math.random() * 256, 3, 2);
-    const fl = ["#ffffff", "#ffe08a", "#ffc7dd"];
-    for (let i = 0; i < 14; i++) {
-      g.fillStyle = fl[i % 3];
-      g.beginPath(); g.arc(Math.random() * 256, Math.random() * 256, 2.2, 0, 7); g.fill();
+  // 两侧草地（512px：大色斑+草簇+更醒目的花）
+  const grassTex = new THREE.CanvasTexture(makeCanvas(512, 512, (g) => {
+    g.fillStyle = "#93cd6d"; g.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 12; i++) {                                   // 大色块变化
+      g.fillStyle = i % 2 ? "rgba(104,168,80,.32)" : "rgba(255,240,150,.10)";
+      g.beginPath();
+      g.ellipse(Math.random() * 512, Math.random() * 512, 40 + Math.random() * 80, 25 + Math.random() * 50, Math.random() * 3, 0, 7);
+      g.fill();
+    }
+    g.strokeStyle = "rgba(70,140,55,.45)"; g.lineWidth = 2;          // 草簇短线
+    for (let i = 0; i < 130; i++) {
+      const x = Math.random() * 512, y = Math.random() * 512;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x - 3, y - 6); g.moveTo(x, y); g.lineTo(x + 3, y - 7); g.stroke();
+    }
+    const fl = ["#ffffff", "#ffe08a", "#ffc7dd"];                    // 花（更大更醒目）
+    for (let i = 0; i < 26; i++) {
+      const x = Math.random() * 512, y = Math.random() * 512, r = 3.5 + Math.random() * 3;
+      g.fillStyle = "#6faf55"; g.fillRect(x - 1, y, 2, 6);
+      g.fillStyle = fl[i % 3]; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+      g.fillStyle = "rgba(255,255,255,.65)"; g.beginPath(); g.arc(x - 1, y - 1, r * 0.4, 0, 7); g.fill();
     }
   }));
   grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping;
-  grassTex.repeat.set(16, 40);
+  grassTex.repeat.set(8, 20);
   const grassMat = new THREE.MeshLambertMaterial({ map: grassTex });
   for (const s of [-1, 1]) {
     const grass = new THREE.Mesh(new THREE.PlaneGeometry(60, 400), grassMat);
@@ -368,22 +460,58 @@ function initScene() {
 
   // 天空背景图（绘本风，挂在远处）
   const skyPlane = new THREE.Mesh(new THREE.PlaneGeometry(420, 120),
-    new THREE.MeshBasicMaterial({ map: texLoader.load("sky.png"), fog: false }));
+    new THREE.MeshBasicMaterial({ map: texLoader.load("sky.jpg"), fog: false }));
   skyPlane.position.set(0, 30, -195);
   scene.add(skyPlane);
 
-  buildScenery();
   buildPlayer();
+  if (tplReady()) buildScenery();           // 模型先就绪（极少见）则直接建，否则等 loadMgr.onLoad
 }
 
-/* ---------- 远景：树/楼/云（循环回收） ---------- */
+/* ---------- 远景：模型库（Quaternius）优先，程序化兜底（循环回收） ---------- */
 const scenItems = [];
 const facadeTex = new THREE.CanvasTexture(makeCanvas(128, 128, (g) => {
   g.fillStyle = "#ffffff"; g.fillRect(0, 0, 128, 128);
   g.fillStyle = "#9fc4d8";
   for (let y = 12; y < 110; y += 28) for (let x = 10; x < 110; x += 26) g.fillRect(x, y, 14, 16);
 }));
-function buildScenery() {
+function spawnProp(name, h) {                 // 从模板克隆（几何/材质共享），按目标高度缩放
+  const c = TPL[name].g.clone(true);
+  c.scale.multiplyScalar(h);
+  return c;
+}
+function buildSceneryModels() {
+  // 远景带 40 个：树/房子/灌木石头，x 8~26
+  for (let i = 0; i < 40; i++) {
+    const side = i % 2 ? 1 : -1;
+    const r = Math.random();
+    let m;
+    if (r < 0.45) {                                     // 树：4 款轮换 + 随机高 + 随机朝向
+      m = spawnProp(TREES[i % TREES.length], 2.8 + Math.random() * 2.4);
+      m.rotation.y = Math.random() * Math.PI * 2;
+    } else if (r < 0.72) {                              // 房子：4 款轮换 + 轻微朝向抖动
+      m = spawnProp(HOUSES[i % HOUSES.length], 3.8 + Math.random() * 2.8);
+      m.rotation.y = (Math.random() - 0.5) * 0.5;
+    } else {                                            // 点缀：灌木/石头
+      m = spawnProp(DECO[i % DECO.length], 0.6 + Math.random() * 1.2);
+      m.rotation.y = Math.random() * Math.PI * 2;
+    }
+    m.position.set(side * (8 + Math.random() * 18), 0, -220 + Math.random() * 240);
+    scene.add(m);
+    scenItems.push({ m, side });
+  }
+  // 近轨点缀带 26 个：草簇/小灌木/小石头，x 4.8~7.5（破"空旷"的关键一层）
+  for (let i = 0; i < 26; i++) {
+    const side = i % 2 ? 1 : -1;
+    const key = NEAR[i % NEAR.length];
+    const m = spawnProp(key, key === "Grass1" ? 0.35 + Math.random() * 0.35 : 0.5 + Math.random() * 0.8);
+    m.rotation.y = Math.random() * Math.PI * 2;
+    m.position.set(side * (4.8 + Math.random() * 2.7), 0, -220 + Math.random() * 240);
+    scene.add(m);
+    scenItems.push({ m, side, near: true });
+  }
+}
+function buildSceneryFallback() {
   const treeMat = new THREE.MeshLambertMaterial({ color: 0x3fa34d });
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
   const houseMats = [0xffd9b3, 0xffb3c8, 0xb3e0ff, 0xfff3b3, 0xd3f0d3]
@@ -392,7 +520,7 @@ function buildScenery() {
   for (let i = 0; i < 26; i++) {
     const side = i % 2 ? 1 : -1;
     let m;
-    if (Math.random() < 0.55) {                    // 树（双层树冠更蓬松）
+    if (Math.random() < 0.55) {
       m = new THREE.Group();
       const h = 2 + Math.random() * 2.5;
       const crown = new THREE.Mesh(new THREE.SphereGeometry(h * 0.55, 8, 8), treeMat);
@@ -402,7 +530,7 @@ function buildScenery() {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, h, 6), trunkMat);
       trunk.position.y = h / 2; m.add(trunk);
       [crown, crown2, trunk].forEach(p => { p.castShadow = true; outline(p); });
-    } else {                                        // 房子（带门窗立面）
+    } else {
       m = new THREE.Group();
       const w = 3 + Math.random() * 3, h = 3 + Math.random() * 4, d = 3 + Math.random() * 2;
       const bodyMat = houseMats[i % houseMats.length];
@@ -418,27 +546,36 @@ function buildScenery() {
     scene.add(m);
     scenItems.push({ m, side });
   }
-  // 云
+}
+function buildClouds() {
   const cloudTex = new THREE.CanvasTexture(makeCanvas(128, 64, (g) => {
     g.fillStyle = "rgba(255,255,255,.95)";
     for (const [x, y, r] of [[35,40,18],[60,30,22],[90,40,18],[60,44,20]]) {
       g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
     }
   }));
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 12; i++) {
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true }));
-    sp.scale.set(14, 7, 1);
-    sp.position.set((Math.random() - 0.5) * 90, 16 + Math.random() * 14, -60 - Math.random() * 140);
+    const s = 10 + Math.random() * 9;
+    sp.scale.set(s, s * 0.5, 1);
+    sp.position.set((Math.random() - 0.5) * 110, 14 + Math.random() * 18, -60 - Math.random() * 140);
     scene.add(sp);
     scenItems.push({ m: sp, cloud: true });
   }
+}
+let sceneryDone = false;
+function buildScenery() {
+  if (!scene || sceneryDone) return;
+  sceneryDone = true;
+  (tplReady() ? buildSceneryModels : buildSceneryFallback)();
+  buildClouds();
 }
 function updateScenery(dt, spd) {
   for (const it of scenItems) {
     it.m.position.z += spd * (it.cloud ? 0.15 : 1) * dt;
     if (it.m.position.z > 25) {
       it.m.position.z = it.cloud ? -200 : -220;
-      if (!it.cloud) it.m.position.x = it.side * (8 + Math.random() * 18);
+      if (!it.cloud) it.m.position.x = it.side * (it.near ? 4.8 + Math.random() * 2.7 : 8 + Math.random() * 18);
     }
   }
 }
@@ -558,7 +695,7 @@ const trainMats = [0xe05353, 0x53a0e0, 0x53b96b, 0xe0a353]
 const steelMat = new THREE.MeshLambertMaterial({ color: 0xd8dde0 });
 const darkMat = new THREE.MeshLambertMaterial({ color: 0x39424a });
 
-function makeTrain(o) {
+function makeTrainOld(o) {                  // 程序化兜底
   const g = new THREE.Group();
   const len = o.len, mat = trainMats[o.lane % trainMats.length];
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 2.1, len), mat);
@@ -576,6 +713,43 @@ function makeTrain(o) {
   [body, roof, face].forEach(p => { p.castShadow = true; outline(p); });
   return g;
 }
+/* 货车拼装：车头(朝玩家) + N 节车厢 + 尾部集装箱，总长贴 o.len；Main 材质按车道配色 */
+function trainPiece(name, main, dark) {
+  const c = TPL[name].g.clone(true);
+  c.traverse(m => {
+    if (!m.isMesh) return;
+    const n = m.material.name;
+    if (n === "Main" || n === "DarkMain") {
+      m.material = m.material.clone();      // 克隆件共享材质，换色前必须克隆
+      m.material.color.copy(n === "Main" ? main : dark);
+    }
+  });
+  const d = TPL[name].dims;
+  c.scale.set(TRAIN_W, d.y * TRAIN_W < 2.1 ? 2.1 / d.y : TRAIN_W, TRAIN_W);  // 宽 1.9，高不足则拔到 2.1
+  return c;
+}
+function makeTrain(o) {
+  if (!tplReady()) return makeTrainOld(o);
+  const hex = [0xe05353, 0x53a0e0, 0x53b96b, 0xe0a353][o.lane % 4];
+  const main = new THREE.Color(hex), dark = main.clone().multiplyScalar(0.55);
+  const fL = TPL.CargoTrain_Front.dims.z * TRAIN_W;
+  const wL = TPL.CargoTrain_Wagon.dims.z * TRAIN_W;
+  const bL = TPL.CargoTrain_Container.dims.z * TRAIN_W;
+  const n = Math.max(1, Math.round((o.len - fL - bL) / wL));
+  const g = new THREE.Group();
+  const parts = [trainPiece("CargoTrain_Front", main, dark)];
+  for (let i = 0; i < n; i++) parts.push(trainPiece("CargoTrain_Wagon", main, dark));
+  parts.push(trainPiece("CargoTrain_Container", main, dark));
+  let cursor = o.len / 2, total = 0;
+  parts.forEach((p, idx) => {
+    const L = idx === 0 ? fL : idx === parts.length - 1 ? bL : wL;
+    p.position.z = cursor - L / 2;
+    cursor -= L; total += L;
+    g.add(p);
+  });
+  g.scale.z = o.len / total;                // 总长贴合碰撞盒
+  return g;
+}
 const stripeTex = new THREE.CanvasTexture(makeCanvas(128, 32, (g) => {
   g.fillStyle = "#FFD54A"; g.fillRect(0, 0, 128, 32);
   g.fillStyle = "#333";
@@ -583,7 +757,7 @@ const stripeTex = new THREE.CanvasTexture(makeCanvas(128, 32, (g) => {
     g.beginPath(); g.moveTo(x, 32); g.lineTo(x + 16, 0); g.lineTo(x + 32, 0); g.lineTo(x + 16, 32); g.fill();
   }
 }));
-function makeBarrier(o) {
+function makeBarrierOld(o) {                // 程序化兜底
   const g = new THREE.Group();
   const postMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
   for (const s of [-0.85, 0.85]) {
@@ -596,15 +770,23 @@ function makeBarrier(o) {
   [board, ...g.children.filter(c => c !== board)].forEach(p => { p.castShadow = true; outline(p); });
   return g;
 }
-function makeBeam(o) {
+function makeBarrier(o) {                   // 农场栅栏（Quaternius）：跳过去
+  if (!tplReady()) return makeBarrierOld(o);
+  const key = Math.random() < 0.5 ? "Fence" : "Fence2";
+  const c = TPL[key].g.clone(true);
+  const d = TPL[key].dims;
+  c.scale.set(1.9 / d.x, 1.05, 1.05);       // 宽贴车道、高 1.05（碰撞：feetY<1.0）
+  return c;
+}
+function makeBeam(o) {                      // 横梁：暖木柱 + 警示红梁 + 骨头牌（滑过去）
   const g = new THREE.Group();
-  const postMat = new THREE.MeshLambertMaterial({ color: 0x6b7a85 });
+  const postMat = new THREE.MeshLambertMaterial({ color: 0x8D6E63 });
   for (const s of [-0.95, 0.95]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.15, 2.6, 0.15), postMat);
     post.position.set(s, 1.3, 0); g.add(post);
   }
   const beam = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.35, 0.35),
-    new THREE.MeshLambertMaterial({ color: 0xe08553 }));
+    new THREE.MeshLambertMaterial({ color: 0xE53935 }));
   beam.position.y = 1.75; g.add(beam);
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.42),
     new THREE.MeshBasicMaterial({ map: boneTex, transparent: true, side: THREE.DoubleSide }));

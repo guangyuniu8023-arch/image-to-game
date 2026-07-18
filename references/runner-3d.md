@@ -6,10 +6,13 @@
 
 - 技术栈与架构
 - 设计基线（数值全部验证过）
-- 程序化建模模式（场景）
+- 场景美术：地面贴图与密度三层
+- 外部 3D 素材库集成（GLB 模板化，推荐）
+- 程序化建模模式（兜底）
 - 程序化角色：IP 特征复刻（核心）
 - 卡通渲染三件套（美术升级）
 - 竖屏锁定（3D 版）
+- 手机显存纪律与上下文丢失
 - 验证方法
 - 已知坑
 
@@ -34,11 +37,60 @@
 | 收集物 | 5 连排：直线 y=0.8 或弧线 y=1.6-\|i-2\|×0.45 |
 | 生命 | 3，受伤无敌 1.5s（visible 闪烁） |
 
-## 程序化建模模式（场景）
+## 场景美术：地面贴图与密度三层
 
-- **轨道**：256² 画布纹理手绘（道砟色块 + 枕木横条 + 每道两条钢轨，按 `laneU=(x+4.4)/8.8` 定位），RepeatWrapping×30 铺满 400 长平面，`offset.y += speed×dt/13.33` 模拟前进——比回收路段简单得多
-- **远景回收池**：26 个树（球+圆柱）/房子（盒+锥顶）+ 8 云（画布纹理 sprite），z>25 传送回 -220 并随机 x
-- **障碍建造器**：火车（车身/车顶/底盘/车窗条/车头/挡风玻璃 6 个盒）、护栏（双柱 + 黄黑斜纹画布纹理板）、横梁（双柱 + 梁 + 骨头挂牌）
+"地面丑/场景空"是两类问题的叠加，分开治：
+
+**地面贴图规范**（轨道/草地这类大平面画布纹理）：
+- 画布 512² 起步（256² 细节必然糊）、repeat 宁少勿多（轨道 1×15、草地 8×20），重复感比分辨率更显廉价
+- 配色从设计令牌取（暖棕道砟 #a5907a、草地 #93cd6d），忌高饱和纯绿/灰泥色
+- 结构 = 底色 + 大块明暗色斑（破单调的关键）+ 中景细节（枕木/碎石/草簇）+ 高光点缀（钢轨高光、小花）
+
+**密度三层**（"空旷"的解法是分层，不是堆数量）：
+1. 远景带：树/房子/大灌木，x 8~26，约 40 个
+2. **近轨点缀带**：草簇/小灌木/小石头，x 4.8~7.5，约 26 个——贴着跑道擦过，是速度感和丰富度的主要来源，小物件可省描边
+3. 云：12 朵，大小 10~19、y 14~32 拉开层次
+回收时按"带"重置 x（scenItems 存 `near` 标记），否则近轨带会被随机到远处。
+
+## 外部 3D 素材库集成（GLB 模板化，推荐）
+
+程序化几何体拼装适合"特征明确的主角"，但树/房/车等通件道具拼不过专业美术。**道具丑的第一反应应该是换素材库，不是调代码**。
+
+**来源决策**（按优先级）：
+1. **CC0 低模库**：Quaternius（quaternius.com，自然/建筑/载具包，CC0 无需署名）、Kenney kit 系列（kenney.nl，GLB 直出）。同包/同作者选全套——混来源画风必打架
+2. 文生/图生 3D（Tripo/Meshy）：只用于库里没有的 IP 定制品，注意免费层许可（非商用或 CC BY 署名）
+3. Sketchfab 等许可混杂站：逐件核实成本高，避免
+
+**获取与转换管线**（kenney.nl 直链慢/断传损坏时的实战路径）：
+- GitHub 搜 CC0 镜像仓库（api.github.com/search/repositories）→ `cdn.jsdelivr.net/gh/<owner>/<repo>@<branch>/<url编码路径>` 拉单件（快且稳）
+- FBX → GLB：`npm i fbx2gltf` 自带 Linux 二进制；GLB 解析校验（JSON chunk 读材质名/贴图/尺寸）
+- 选型必须目检：搭一个"全部模型排队"的测试页截一张图再定名单
+
+**GLB 模板化模式**（游戏内集成）：
+```js
+const gltfLoader = new THREE.GLTFLoader(loadMgr);   // 必须挂同一个 LoadingManager → 加载门自动覆盖
+// 每个 GLB 加载后预处理成模板，游戏中 clone(true) 实例化（几何/材质共享）
+function prepModel(name, gltf) {
+  const meshes = [];
+  root.traverse(m => { if (m.isMesh) meshes.push(m); });   // 先收集！traverse 回调里 add 会死循环
+  for (const m of meshes) {
+    m.material = new THREE.MeshLambertMaterial({ color: src.color, name: src.name });  // 转平光统一画风
+    m.castShadow = true; outline(m);                     // 描边在模板阶段做一次，克隆自带
+  }
+  // 归一化：树房按高=1、载具按宽=1（先旋正长轴再量），锚点移到"底部中心"，尺寸存 TPL[name].dims
+}
+```
+- **克隆件动态换色前必须 `m.material = m.material.clone()`**，否则一改全改
+- **长载具拼装**（火车=车头+N 节车厢+尾节）：模板记录各段长度，按碰撞盒总长 `g.scale.z = len/total` 贴合；碰撞语义不变
+- **兜底**：`THREE.GLTFLoader` 缺失或加载失败 → 回退程序化建造器（`tplReady()` 门控）
+- 手动给 GLB 配外部贴图（如调色板）：`t.flipY = false; t.encoding = THREE.sRGBEncoding`（r147），否则颠倒/发灰
+
+## 程序化建模模式（场景，兜底）
+
+模型库不可用时的兜底建造器，也是"机制原型"的快速验证手段：
+- **轨道**：512² 画布纹理手绘（道砟色斑 + 枕木横条 + 每道两条钢轨，按 `laneU=(x+4.4)/8.8` 定位），RepeatWrapping 铺满 400 长平面，`offset.y += speed×dt/13.33` 模拟前进——比回收路段简单得多
+- **远景回收池**：树（球+圆柱）/房子（盒+锥顶）+ 云（画布纹理 sprite），z>25 传送回 -220 并随机 x
+- **障碍建造器**：火车（盒组）、护栏（双柱+斜纹板）、横梁（双柱+梁+挂牌）
 - **网格生命周期**：`allMeshes` 注册表，syncWorld 每帧按数据集合增删网格——防止已回收障碍的"僵尸网格"泄漏
 
 ## 程序化角色：IP 特征复刻（核心）
@@ -117,6 +169,18 @@ function anyKey() { if (!assetsReady) return; /* ...原逻辑 */ }
 
 注意：`new Image()` 不设 src 时 `complete` 为 true（测试时别用它模拟"未加载"）；机器人桩里让 Image 的 src setter 立即触发 onload。
 
+## 手机显存纪律与上下文丢失
+
+**症状识别**：整屏只剩底色（场景全消失）但 DOM HUD/面板数值正常 = WebGL 上下文丢失或渲染进程被杀，不是逻辑 bug。桌面无头截图测不出来，要靠机制预防。
+
+**预防**（MSAA×高 pixelRatio 的帧缓冲是显存大头，其次大贴图）：
+- `renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5))`——别用 2，视觉差别极小、显存省一半以上
+- 单张纹理压到 ≤1024（AI 常出 1536+）：缩图后显存立省 3/4
+- 不透明大图一律 JPG（天空 1.3MB PNG → 63KB JPG）；只有透明件保 PNG
+- 描边壳翻倍网格数：小点缀件（草簇）不加描边
+
+**兜底**：`renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); location.reload(); })`——有加载门重载才安全（玩家看到的还是进度条而不是半成品）。
+
 ## 验证方法
 
 - **机器人** `scripts/runner_bot.js`：找最近一排 → 算 blocked lanes → 护栏/横梁提前 0.45×速度 跳/滑、火车提前换道。120s 存活即证明刷怪公平
@@ -129,3 +193,6 @@ function anyKey() { if (!assetsReady) return; /* ...原逻辑 */ }
 2. `node ... | head` 会 SIGPIPE，导致 `&&` 链后续命令静默不执行
 3. 远景雾（Fog 60-200）遮 distant pop-in；草地配色要柔（高饱和亮绿很刺眼）
 4. 换道输入要"按一次换一次"（keydown 消费制），不能按住连续换
+5. `traverse` 回调里给场景 add 节点（如描边壳）会触发无限递归栈溢出——先收集网格到数组，遍历结束后再统一 add
+6. rAF 循环会把 `--virtual-time-budget` 瞬间烧完，截图永远在加载前——用 CDP 等 `document.title==="READY"` 再截
+7. kenney.nl 直链下载慢且断传会产出"尺寸超原文件"的坏 zip（服务端不理 Range，续传=重复追加）——改走 GitHub 镜像 + jsdelivr 拉单件
