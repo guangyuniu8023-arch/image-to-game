@@ -85,7 +85,7 @@
    BUILD 上屏用于确认用户跑的是哪个版本；
    渲染连续失败 → 自动打 runner_safe 标记重载进入兼容模式（关 AA/阴影/描边、像素比 1），
    兼容模式仍失败 → 显示错误页，绝不静默蓝屏 */
-const BUILD = "b250718-8";
+const BUILD = "b250718-9";
 const safeMode = (() => { try { return localStorage.getItem("runner_safe") === "1"; } catch (e) { return false; } })();
 function enterSafeMode() {
   if (safeMode) { fatal("当前设备/浏览器无法运行 3D 画面，请更换浏览器或设备重试"); return; }
@@ -299,7 +299,7 @@ function updateLoadingUI() {
   if (assetsReady && LG.state === "title") showPanel("title");
 }
 loadMgr.onProgress = (u, done, total) => { texDone = done; texTotal = total; updateLoadingUI(); };
-loadMgr.onLoad = () => { buildScenery(); updateLoadingUI(); };   // GLB 全部就绪后再建远景
+loadMgr.onLoad = () => { buildScenery(); buildPlayer(); updateLoadingUI(); };   // GLB 全部就绪后再建远景与角色
 for (const src of domAssets) {
   const im = new Image();
   im.onload = im.onerror = () => { imgDone++; updateLoadingUI(); };
@@ -377,6 +377,31 @@ if (gltfLoader) {
   }
 }
 const tplReady = () => MODEL_FILES.every(f => TPL[f]);
+
+/* 玩家狗：Meshy 绑骨 3D 模型（走加载门），失败回退程序化 */
+let dogGLB = null;
+if (gltfLoader) {
+  gltfLoader.load("models/puppy_run.glb", g => { dogGLB = g; }, undefined,
+    err => console.warn("狗模型加载失败", err));
+}
+/* 蒙皮网格的真实包围盒（Box3.setFromObject 对蒙皮只算绑定姿势） */
+function skinnedBounds(root) {
+  root.updateMatrixWorld(true);
+  const min = new THREE.Vector3(1e9, 1e9, 1e9), max = new THREE.Vector3(-1e9, -1e9, -1e9);
+  const v = new THREE.Vector3();
+  root.traverse(m => {
+    if (!m.isSkinnedMesh) return;
+    const pos = m.geometry.attributes.position;
+    const step = Math.max(1, Math.floor(pos.count / 1500));
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i);
+      m.boneTransform(i, v);
+      v.applyMatrix4(m.matrixWorld);
+      min.min(v); max.max(v);
+    }
+  });
+  return new THREE.Box3(min, max);
+}
 
 function makeCanvas(w, h, draw) {
   const cv2 = document.createElement("canvas");
@@ -563,8 +588,8 @@ function initScene() {
   skyPlane.position.set(0, 30, -195);
   scene.add(skyPlane);
 
-  buildPlayer();
   if (tplReady()) buildScenery();           // 模型先就绪（极少见）则直接建，否则等 loadMgr.onLoad
+  if (dogGLB) buildPlayer();
 }
 
 /* ---------- 远景：模型库（Quaternius）优先，程序化兜底（循环回收） ---------- */
@@ -735,9 +760,54 @@ function updateScenery(dt, spd) {
   }
 }
 
-/* ---------- 玩家：程序化 3D 小狗（复刻 IP 特征） + 影子 ---------- */
-let dog, shadowMesh;
+/* ---------- 玩家：Meshy 绑骨 3D 小狗（GLB 优先，程序化兜底） + 影子 ---------- */
+let dog, shadowMesh, dogMixer, playerBuilt = false;
 function buildPlayer() {
+  if (playerBuilt) return;
+  playerBuilt = true;
+  if (dogGLB) buildPlayerGLB(); else buildPlayerFallback();
+}
+function buildShadow() {
+  const shTex = new THREE.CanvasTexture(makeCanvas(64, 64, (g) => {
+    const gr = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+    gr.addColorStop(0, "rgba(0,0,0,.4)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  }));
+  shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6),
+    new THREE.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false }));
+  shadowMesh.rotation.x = -Math.PI / 2; shadowMesh.position.y = 0.02;
+  scene.add(shadowMesh);
+}
+const DOG_ROT_Y = Math.PI;                  // GLB 狗朝向校正（实测迭代）
+function buildPlayerGLB() {
+  const root = dogGLB.scene;
+  // 转 Lambert 平光：保留贴图、关掉自发光/PBR 扩展，和场景卡通平光统一
+  // （蒙皮描边壳会随骨骼缩放露背脸，弃用——该模型自带绘制感）
+  root.traverse(m => {
+    if (m.isSkinnedMesh) {
+      m.material = new THREE.MeshLambertMaterial({ map: m.material.map || null });
+      m.castShadow = true;
+      m.frustumCulled = false;               // 蒙皮包围盒不跟动画，防误剔除
+    }
+  });
+  const mixer = new THREE.AnimationMixer(root);
+  mixer.clipAction(dogGLB.animations[0]).play();
+  mixer.update(0.001);
+  const box = skinnedBounds(root);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const s = 1.3 / (size.y || 1);
+  root.scale.set(s, s, s);
+  const b2 = skinnedBounds(root);
+  root.position.y = -b2.min.y;
+  const g = new THREE.Group();
+  root.rotation.y = DOG_ROT_Y;
+  g.add(root);
+  scene.add(g);
+  dog = { g, mixer };
+  dogMixer = mixer;
+  buildShadow();
+}
+function buildPlayerFallback() {
   const fur = new THREE.MeshLambertMaterial({ color: 0xF5EDE0 });   // 奶油白绒毛
   const furL = new THREE.MeshLambertMaterial({ color: 0xE9DBC4 });  // 浅色耳/尾
   const red = new THREE.MeshLambertMaterial({ color: 0xE53935 });   // 红围巾
@@ -798,18 +868,30 @@ function buildPlayer() {
   g.traverse(m => { if (m.isMesh) parts.push(m); });
   parts.forEach(m => { m.castShadow = true; outline(m, 1.05); });
   scene.add(g);
-  const shTex = new THREE.CanvasTexture(makeCanvas(64, 64, (g) => {
-    const gr = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-    gr.addColorStop(0, "rgba(0,0,0,.4)"); gr.addColorStop(1, "rgba(0,0,0,0)");
-    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
-  }));
-  shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6),
-    new THREE.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false }));
-  shadowMesh.rotation.x = -Math.PI / 2; shadowMesh.position.y = 0.02;
-  scene.add(shadowMesh);
+  buildShadow();
 }
 function updatePlayerMesh() {
+  if (!dog) return;                          // 模型未就绪（加载中）
   const p = LG.player;
+  if (dogMixer) {                            // GLB 绑骨狗：动画驱动
+    const roll = p.rolling > 0, air = p.y > 0.02;
+    if (LG.state === "play") {
+      if (!air && !roll) dogMixer.update(frameDt * (LG.speed / 12));   // 步频随跑速
+    } else {
+      dogMixer.update(frameDt * 0.5);        // 标题/结算页慢慢跑（橱窗效果）
+    }
+    const g = dog.g;
+    g.position.set(p.x, p.y, 0);
+    g.scale.set(1, roll ? 0.55 : (air ? 1.06 : 1), 1);
+    g.rotation.z = -(LANES[p.lane] - p.x) * 0.22;
+    g.rotation.y = -(LANES[p.lane] - p.x) * 0.18;
+    g.visible = !(p.inv > 0 && Math.floor(LG.time * 12) % 2 === 0);
+    const sc = Math.max(0.4, 1 - p.y * 0.35);
+    shadowMesh.scale.set(sc, sc, sc);
+    shadowMesh.position.x = p.x;
+    shadowMesh.material.opacity = Math.max(0.25, 1 - p.y * 0.4);
+    return;
+  }
   const roll = p.rolling > 0;
   const air = p.y > 0.02;
   const ph = LG.time * LG.speed * 1.6;
@@ -992,7 +1074,8 @@ function showPanel(kind) {
   hud.style.display = "none"; el.style.display = "flex";
   if (kind === "title") {
     const verTag = '<div style="position:absolute;right:10px;bottom:8px;font-size:11px;color:#fff;opacity:.65;'
-      + 'text-shadow:0 1px 2px rgba(0,0,0,.3)">' + BUILD + (safeMode ? " · 兼容模式" : "") + '</div>';
+      + 'text-shadow:0 1px 2px rgba(0,0,0,.3)">' + BUILD + (safeMode ? " · 兼容模式" : "")
+      + '<br>3D角色 © Meshy CC BY 4.0</div>';
     if (!assetsReady) {   // 资源加载中：Logo + 进度条
       const p = loadProgress();
       el.innerHTML = '<div class="logo">汪汪跑酷</div>'
@@ -1030,12 +1113,13 @@ function updateCamera() {
 }
 
 /* ================= 主循环（带渲染守卫：连续失败自动进兼容模式） ================= */
-let lastT = 0, renderFails = 0, frames = 0;
+let lastT = 0, renderFails = 0, frames = 0, frameDt = 0;
 function loop(t) {
   requestAnimationFrame(loop);
   let dt = (t - lastT) / 1000; lastT = t;
   if (dt > 1 / 30) dt = 1 / 30;
   if (dt < 0) dt = 0;
+  frameDt = dt;
   try {
     update(dt);
     const spd = LG.state === "play" ? (LG.slowT > 0 ? LG.speed * 0.45 : LG.speed) : 0;

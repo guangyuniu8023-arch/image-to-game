@@ -8,6 +8,7 @@
 | Fence.glb, Fence2.glb | Farm Buildings (Sept 2018) | Quaternius | CC0 1.0 |
 | CargoTrain_Front/Wagon/Container.glb | Train Pack (April 2019) | Quaternius | CC0 1.0 |
 | kenney_crate.glb | Platformer Kit | Kenney | CC0 1.0 |
+| puppy_run.glb（玩家角色，绑骨跑步动画） | Meshy AI 生成（三视图多图输入 + 自动绑骨） | Meshy | **CC BY 4.0（免费层，需署名）**——已在标题页角标署名 "3D角色 © Meshy" |
 
 - 作者站点：https://quaternius.com 、https://kenney.nl （CC0 公共领域，可商用，无需署名）
 - 获取镜像：https://github.com/beep2bleep/FreeAssetsByKenneyNLandQuaternius
