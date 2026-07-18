@@ -85,7 +85,7 @@
    BUILD 上屏用于确认用户跑的是哪个版本；
    渲染连续失败 → 自动打 runner_safe 标记重载进入兼容模式（关 AA/阴影/描边、像素比 1），
    兼容模式仍失败 → 显示错误页，绝不静默蓝屏 */
-const BUILD = "b250718-5";
+const BUILD = "b250718-6";
 const safeMode = (() => { try { return localStorage.getItem("runner_safe") === "1"; } catch (e) { return false; } })();
 function enterSafeMode() {
   if (safeMode) { fatal("当前设备/浏览器无法运行 3D 画面，请更换浏览器或设备重试"); return; }
@@ -269,7 +269,7 @@ function anyKey() {
 <script>
 "use strict";
 /* ================= 3D 场景（程序化建模） ================= */
-let scene, camera, renderer, trackTex;
+let scene, camera, renderer, trackTex, yardTex, wallTex;
 /* 资源加载门：纹理 + DOM 图片全部就绪才开局，标题页显示进度条（杜绝慢网络下的占位/素模） */
 const loadMgr = new THREE.LoadingManager();
 const texLoader = new THREE.TextureLoader(loadMgr);
@@ -445,7 +445,7 @@ function initScene() {
   scene.add(track);
 
   // 两侧站场地面（512px 砟石/水泥：地铁跑酷没有大草坪，全是砟石场）
-  const yardTex = new THREE.CanvasTexture(makeCanvas(512, 512, (g) => {
+  yardTex = new THREE.CanvasTexture(makeCanvas(512, 512, (g) => {
     g.fillStyle = "#a9a294"; g.fillRect(0, 0, 512, 512);              // 灰暖砟石底
     for (let i = 0; i < 16; i++) {                                    // 大块明暗
       g.fillStyle = i % 2 ? "rgba(0,0,0,.06)" : "rgba(255,255,255,.06)";
@@ -493,7 +493,7 @@ function initScene() {
   }
 
   // 两侧站场围墙（城市走廊感的关键）：混凝土板+立柱+涂鸦，静态不回收
-  const wallTex = new THREE.CanvasTexture(makeCanvas(256, 128, (g) => {
+  wallTex = new THREE.CanvasTexture(makeCanvas(256, 128, (g) => {
     g.fillStyle = "#b5aea0"; g.fillRect(0, 0, 256, 128);
     g.fillStyle = "#a29a8b"; g.fillRect(0, 0, 26, 128);               // 立柱
     g.fillStyle = "rgba(0,0,0,.14)"; g.fillRect(22, 0, 4, 128);
@@ -690,7 +690,7 @@ function buildScenery() {
 }
 function updateScenery(dt, spd) {
   for (const it of scenItems) {
-    it.m.position.z += spd * (it.cloud ? 0.15 : 1) * dt;
+    it.m.position.z += spd * (it.cloud ? 0 : 1) * dt;   // 云是静止天幕，不跟不漂
     if (it.m.position.z > 25) {
       it.m.position.z = it.cloud ? -200 : (it.kind === "gantry" ? -225 - Math.random() * 12 : -225);
       if (it.kind === "bld") it.m.position.x = it.side * (12.5 + Math.random() * 5);
@@ -1007,6 +1007,8 @@ function loop(t) {
     const spd = LG.state === "play" ? (LG.slowT > 0 ? LG.speed * 0.45 : LG.speed) : 0;
     if (spd > 0) {
       trackTex.offset.y += spd * dt / 13.33;
+      yardTex.offset.y += spd * dt / 13.33;      // 站场地面与轨道同速后退
+      wallTex.offset.x += spd * dt / 15.38;      // 围墙纹理同步滚动（不滚就是贴着镜头往前飞）
       updateScenery(dt, spd);
     }
     if (shakeT > 0) shakeT -= dt;
