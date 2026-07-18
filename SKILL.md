@@ -28,7 +28,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
    - 只说"做个小游戏"没提类型 → 用 ask_user **一次性**问清：游戏类型为主（选项结合图片主题给 2-4 个具体的，如"横版闯关（类似超级玛丽）/ 3D 跑酷（类似地铁跑酷）"，标注推荐项），最多再加一个难度/受众问题；
    - 得到答复前不开工；严禁分多轮连环追问。
 2. **素材流水线**：按 [references/assets.md](references/assets.md) —— 主角抠图（`scripts/remove_bg.py`）、提取主色（`scripts/extract_palette.py`）、以原图为风格参考 AI 生成全套素材、清理水印与裁剪（`scripts/clean_sprite.py`）。
-3. **写一页 GDD**：按类型包模板填（平台跳跃 → [references/gdd.md](references/gdd.md)，含已验证的物理基线与关卡红线）。
+3. **写一页 GDD**：已有类型按类型包模板填（平台跳跃 → [references/gdd.md](references/gdd.md)，含已验证的物理基线与关卡红线）；**新类型先按 [references/new-type.md](references/new-type.md) 五步推演定稿 GDD**（核心循环、机制基线、可行性红线、关卡/进度、架构与验收定义）再写代码。
 4. **单文件实现**：照 [references/game-patterns.md](references/game-patterns.md) 的结构写（瓦片碰撞、跳跃手感、敌人 AI、视差、合成音效、横竖屏自适应、触控）。
 5. **机器人通关验证（硬门槛）**：`node scripts/bot_harness.js <index.html>`，失败先改关卡不改机器人。
 6. **截图验收**：`scripts/make_ff_pages.py` 生成快进页 + 无头 Chromium 截图，至少验收标题/中段/终点/竖屏/横屏窗口（确认居中留边）5 张。
@@ -54,7 +54,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 
 - **2D 平台跳跃**（超级玛丽式）：[references/gdd.md](references/gdd.md)（设计基线 + 关卡配方）+ [references/game-patterns.md](references/game-patterns.md)（实现模式），机器人 `scripts/bot_harness.js`。
 - **3D 跑酷**（神庙逃亡/地铁跑酷式）：[references/runner-3d.md](references/runner-3d.md)（设计基线 + 程序化建模 + 程序化角色 IP 复刻），机器人 `scripts/runner_bot.js`，引擎 three.js r147 本地打包。
-- 新增游戏类型：在 `references/` 下加一个同结构类型包（设计基线 + 实现模式 + 配套机器人脚本），SKILL.md 通用流程不变。每个包必须实战验证过才可写入。
+- 新增游戏类型：先按 [references/new-type.md](references/new-type.md) 的五步推演产出设计说明（核心循环 → 机制基线 → 可行性红线 → 关卡/进度 → 架构与验收定义），实战验证 + 用户验收后，在 `references/` 下固化一个同结构类型包（设计基线 + 实现模式 + 配套机器人脚本），SKILL.md 通用流程不变。每个包必须实战验证过才可写入。
 
 两个已验证类型另有**完整可运行的参考实现**（汪汪主题，可直接换皮）：`templates/platformer-2d/`、`templates/runner-3d/`。模板体积大**不随 .skill 包分发**，与本 skill 同仓库获取。**若 skill 旁没有 templates/ 目录**（单独安装的包），说明无模板可用——直接走工作流一，类型包已含全部构建基线，不依赖模板。
 
