@@ -44,6 +44,8 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 - **3D 跑酷**（神庙逃亡/地铁跑酷式）：[references/runner-3d.md](references/runner-3d.md)（设计基线 + 程序化建模 + 程序化角色 IP 复刻），机器人 `scripts/runner_bot.js`，引擎 three.js r147 本地打包。
 - 新增游戏类型：在 `references/` 下加一个同结构类型包（设计基线 + 实现模式 + 配套机器人脚本），SKILL.md 通用流程不变。每个包必须实战验证过才可写入。
 
+两个已验证类型都有**完整可运行的参考实现**（汪汪主题，可直接换皮）：2D 平台跳跃 `templates/platformer-2d/`、3D 跑酷 `templates/runner-3d/`。模板体积大不随包分发，与本 skill 同仓库获取；有模板时优先"克隆模板 + 替换素材"，比从零构建更快更稳。
+
 ## 环境适配（换 Agent / 换环境时替换这三处）
 
 skill 只有三处依赖具体环境。**意图不变，实现可换**——下表"本环境实现"列只是示例：

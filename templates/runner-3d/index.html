@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>汪汪跑酷</title>
+<style>
+  @font-face { font-family: Kenney; src: url("kenney.ttf"); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #20242b;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none; }
+  #stage { position: fixed; overflow: hidden; background: #87CEEB; }
+  #c { position: absolute; inset: 0; display: block; }
+  #hud { position: absolute; top: 12px; left: 12px; right: 12px; display: none;
+    justify-content: space-between; pointer-events: none; z-index: 5; }
+  /* HUD chip：Kenney 灰底描边按钮九宫格 */
+  .chip { display: flex; align-items: center; gap: 6px; height: 50px; padding: 0 12px;
+    font-size: 17px; font-weight: 900; color: #4E342E;
+    border-image: url("chip_grey.png") 20 fill / 20px; border-style: solid; border-width: 10px; }
+  .chip span { font-family: Kenney, "PingFang SC", sans-serif; font-size: 19px; }
+  .chip img { width: 22px; height: 22px; object-fit: contain; }
+  .chip svg { width: 22px; height: 22px; }
+  /* 全屏面板 */
+  #panel { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 10;
+    background: rgba(40,60,80,.35); color: #fff; text-align: center; }
+  .logo { font-size: 64px; font-weight: 900; color: #FFF; line-height: 1.1;
+    text-shadow: -3px -3px 0 #B33A2B, 3px -3px 0 #B33A2B, -3px 3px 0 #B33A2B, 3px 3px 0 #B33A2B,
+      -3px 0 0 #B33A2B, 3px 0 0 #B33A2B, 0 -3px 0 #B33A2B, 0 3px 0 #B33A2B,
+      0 7px 0 #8E2F23, 0 12px 20px rgba(0,0,0,.35);
+    animation: bob 1.6s ease-in-out infinite alternate; }
+  .sub { margin-top: 12px; font-family: Kenney, "PingFang SC", sans-serif; font-size: 19px;
+    letter-spacing: 6px; opacity: .95; text-shadow: 0 2px 0 rgba(0,0,0,.3); }
+  @keyframes bob { from { transform: translateY(0); } to { transform: translateY(-10px); } }
+  .stars { margin-top: 16px; display: flex; gap: 8px; }
+  .stars img { width: 32px; }
+  #panel img.hero { width: 150px; margin-top: 10px; filter: drop-shadow(0 8px 12px rgba(0,0,0,.3));
+    animation: bob 1.2s ease-in-out infinite alternate; }
+  /* Kenney PNG 按钮 */
+  .btn { width: 230px; height: 76px; margin-top: 22px; display: flex; align-items: center;
+    justify-content: center; gap: 8px; font-size: 24px; font-weight: 900; color: #fff;
+    letter-spacing: 4px; text-shadow: 0 2px 0 rgba(0,0,0,.3);
+    border-image: url("btn_red.png") 24 fill / 24px; border-style: solid; border-width: 12px;
+    animation: breath 1.4s ease-in-out infinite alternate; }
+  @keyframes breath { from { scale: 1; } to { scale: 1.04; } }
+  .tips { margin-top: 20px; font-size: 15px; font-weight: bold; line-height: 1.9;
+    text-shadow: 0 1px 0 rgba(0,0,0,.3); }
+  .loadwrap { width: 300px; height: 26px; margin-top: 26px; background: rgba(255,255,255,.35);
+    border-radius: 13px; overflow: hidden; border: 3px solid rgba(255,255,255,.6); }
+  .loadbar { height: 100%; background: #FFF8EC; border-radius: 9px; transition: width .2s; }
+  /* 结算卡片 */
+  .card { width: 320px; background: #FFF8EC; border: 5px solid #6D4C41; border-radius: 24px;
+    box-shadow: 0 8px 0 rgba(0,0,0,.25); color: #4E342E; padding-bottom: 28px; }
+  .card .head { background: #E53935; color: #fff; font-size: 28px; font-weight: 900;
+    letter-spacing: 6px; padding: 16px 0 13px; border-bottom: 5px solid #6D4C41;
+    border-radius: 18px 18px 0 0; text-shadow: 0 2px 0 rgba(0,0,0,.25); }
+  .card .stars { margin-top: 14px; justify-content: center; }
+  .card .stars img { width: 36px; }
+  .card .label { margin-top: 12px; font-size: 15px; font-weight: bold; color: #A1887F; }
+  .card .score { font-family: Kenney, "PingFang SC", sans-serif; font-size: 52px; }
+  .card .pillrow { display: flex; justify-content: center; gap: 10px; margin-top: 12px; }
+  .card .pill { display: flex; align-items: center; gap: 6px; background: #fff;
+    border: 3px solid #D7CCC8; border-radius: 999px; padding: 6px 13px;
+    font-size: 15px; font-weight: 900; }
+  .card .pill img { width: 18px; height: 18px; object-fit: contain; }
+  .card .btn { width: 200px; height: 66px; margin: 20px auto 0; font-size: 20px; }
+</style>
+</head>
+<body>
+<div id="stage">
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="chip"><img src="bone.png" alt="">× <span id="bones">0</span></div>
+  <div class="chip"><svg viewBox="0 0 40 36"><path d="M20 33 C8 24 2 17 2 10.5 C2 5 6.5 2 11 2 C15 2 18.5 4.5 20 8 C21.5 4.5 25 2 29 2 C33.5 2 38 5 38 10.5 C38 17 32 24 20 33 Z" fill="#E53935" stroke="#B33A2B" stroke-width="2"/></svg>× <span id="lives">3</span></div>
+  <div class="chip">分数 <span id="score">0</span></div>
+</div>
+<div id="panel"></div>
+</div>
+<script src="three.min.js"></script>
+<script>
+"use strict";
+/* ================= 输入 ================= */
+const keys = {};
+addEventListener("keydown", e => {
+  if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Space"].includes(e.code)) e.preventDefault();
+  keys[e.code] = true; anyKey();
+});
+addEventListener("keyup", e => keys[e.code] = false);
+let tx = 0, ty = 0;
+addEventListener("pointerdown", e => { tx = e.clientX; ty = e.clientY; anyKey(); });
+addEventListener("pointerup", e => {
+  const dx = e.clientX - tx, dy = e.clientY - ty;
+  if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
+  if (Math.abs(dx) > Math.abs(dy)) keys[dx > 0 ? "ArrowRight" : "ArrowLeft"] = true;
+  else keys[dy > 0 ? "ArrowDown" : "ArrowUp"] = true;
+  setTimeout(() => { keys.ArrowLeft = keys.ArrowRight = keys.ArrowUp = keys.ArrowDown = false; }, 80);
+});
+
+/* ================= 音效 ================= */
+let AC = null;
+function beep(freq, dur, type = "square", vol = 0.13, slide = 0) {
+  try {
+    if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, AC.currentTime);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), AC.currentTime + dur);
+    g.gain.setValueAtTime(vol, AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + dur);
+    o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + dur);
+  } catch (e) {}
+}
+const sfx = {
+  jump: () => beep(320, 0.18, "square", 0.1, 500),
+  roll: () => beep(200, 0.15, "square", 0.09, 200),
+  bone: () => { beep(900, 0.07, "sine", 0.14); setTimeout(() => beep(1350, 0.1, "sine", 0.14), 55); },
+  hit:  () => beep(300, 0.4, "sawtooth", 0.14, -240),
+  over: () => [400, 330, 260].forEach((f, i) => setTimeout(() => beep(f, 0.25, "square", 0.1), i * 160)),
+};
+
+/* ================= 逻辑层（纯数据，不依赖 THREE） ================= */
+const LANES = [-2.2, 0, 2.2];
+const LG = {
+  state: "title",      // title | play | gameover
+  speed: 12, maxSpeed: 30, dist: 0, score: 0, bones: 0, lives: 3,
+  best: 0, time: 0, stateT: 0, slowT: 0,
+  player: { lane: 0, x: 0, y: 0, vy: 0, rolling: 0, inv: 0 },
+  obs: [], bonesArr: [], nextRowZ: -40, seed: 12345,
+};
+function rng() { LG.seed = (LG.seed * 1103515245 + 12345) % 2147483648; return LG.seed / 2147483648; }
+function pick(arr) { return arr[Math.floor(rng() * arr.length)]; }
+
+const OB = { TRAIN: "train", BARRIER: "barrier", BEAM: "beam" };
+
+function spawnRow(z) {
+  const lanes = [0, 1, 2];
+  const r = rng();
+  if (r < 0.22) {                       // 火车：占 1 条道
+    const lane = pick(lanes);
+    LG.obs.push({ lane, z, type: OB.TRAIN, len: 10 + rng() * 5, mesh: null });
+  } else if (r < 0.55) {                // 护栏（跳过去）：占 1~2 条道
+    const n = rng() < 0.5 ? 1 : 2;
+    lanes.sort(() => rng() - 0.5).slice(0, n).forEach(lane =>
+      LG.obs.push({ lane, z, type: OB.BARRIER, len: 0.6, mesh: null }));
+  } else if (r < 0.8) {                 // 横梁（滑过去）：占 1~2 条道
+    const n = rng() < 0.5 ? 1 : 2;
+    lanes.sort(() => rng() - 0.5).slice(0, n).forEach(lane =>
+      LG.obs.push({ lane, z, type: OB.BEAM, len: 0.6, mesh: null }));
+  }
+  // 50% 概率撒一排骨头（可能在障碍上方）
+  if (rng() < 0.5) {
+    const lane = pick(lanes);
+    const arc = rng() < 0.4;
+    for (let i = 0; i < 5; i++)
+      LG.bonesArr.push({ lane, z: z - 3 + i * 1.6, y: arc ? 1.6 - Math.abs(i - 2) * 0.45 : 0.8, got: false, mesh: null });
+  }
+}
+
+function newGame() {
+  LG.state = "play"; LG.stateT = 0; LG.speed = 12; LG.dist = 0;
+  LG.score = 0; LG.bones = 0; LG.lives = 3; LG.time = 0; LG.slowT = 0;
+  LG.player = { lane: 0, x: 0, y: 0, vy: 0, rolling: 0, inv: 0 };
+  LG.obs = []; LG.bonesArr = []; LG.nextRowZ = -50; LG.seed = (Date.now() % 100000) + 1;
+  syncHud(); showPanel(null);
+}
+
+function hitObstacle() {
+  if (LG.player.inv > 0) return;
+  LG.lives--; LG.player.inv = 1.5; LG.slowT = 0.5; sfx.hit(); shakeT = 0.35;
+  if (LG.lives <= 0) {
+    LG.state = "gameover"; LG.stateT = 0; sfx.over();
+    LG.best = Math.max(LG.best, LG.score);
+    try { localStorage.setItem("runner_best", LG.best); } catch (e) {}
+    showPanel("over");
+  }
+  syncHud();
+}
+
+function update(dt) {
+  LG.time += dt; LG.stateT += dt;
+  if (LG.state !== "play") return;
+  const p = LG.player;
+  const spd = LG.slowT > 0 ? LG.speed * 0.45 : LG.speed;
+  if (LG.slowT > 0) LG.slowT -= dt;
+
+  // 换道
+  if (keys.ArrowLeft && p.lane > 0) { p.lane--; keys.ArrowLeft = false; }
+  if (keys.ArrowRight && p.lane < 2) { p.lane++; keys.ArrowRight = false; }
+  p.x += (LANES[p.lane] - p.x) * Math.min(1, dt * 12);
+
+  // 跳跃 / 滑铲
+  const onGround = p.y <= 0.001;
+  if (keys.ArrowUp && onGround && p.rolling <= 0) { p.vy = 8.5; sfx.jump(); }
+  keys.ArrowUp = false;
+  if (keys.ArrowDown && p.rolling <= 0) { p.rolling = 0.65; sfx.roll(); if (!onGround) p.vy = -12; }
+  keys.ArrowDown = false;
+  if (p.rolling > 0) p.rolling -= dt;
+  if (!onGround || p.vy > 0) {
+    p.vy -= 25 * dt; p.y += p.vy * dt;
+    if (p.y <= 0) { p.y = 0; p.vy = 0; }
+  }
+  if (p.inv > 0) p.inv -= dt;
+
+  // 前进
+  LG.dist += spd * dt;
+  LG.score = Math.floor(LG.dist * 10) + LG.bones * 100;
+  LG.speed = Math.min(LG.maxSpeed, LG.speed + dt * 0.45);
+
+  // 世界前移
+  for (const o of LG.obs) o.z += spd * dt;
+  for (const b of LG.bonesArr) b.z += spd * dt;
+  LG.nextRowZ += spd * dt;
+
+  // 生成新排（间距随速度，保证反应时间 ≥1s）
+  if (LG.nextRowZ > -150) {
+    spawnRow(-180);
+    LG.nextRowZ = -180 - Math.max(16, LG.speed * 1.15);
+  }
+  // 回收
+  LG.obs = LG.obs.filter(o => o.z < 15);
+  LG.bonesArr = LG.bonesArr.filter(b => b.z < 15 && !b.got);
+
+  // 碰撞
+  const px = p.x, feetY = p.y, headY = p.y + (p.rolling > 0 ? 1.0 : 2.2);
+  for (const o of LG.obs) {
+    if (Math.abs(o.z) > o.len / 2 + 0.4) continue;
+    if (Math.abs(LANES[o.lane] - px) > 1.15) continue;
+    let hit = false;
+    if (o.type === OB.TRAIN) hit = headY > 0.1;
+    else if (o.type === OB.BARRIER) hit = feetY < 1.0;
+    else if (o.type === OB.BEAM) hit = headY > 1.55;
+    if (hit) { hitObstacle(); break; }
+  }
+  // 吃骨头
+  for (const b of LG.bonesArr) {
+    if (b.got || Math.abs(b.z) > 0.9) continue;
+    if (Math.abs(LANES[b.lane] - px) < 1.1 && Math.abs((feetY + 0.9) - b.y) < 1.0) {
+      b.got = true; LG.bones++; sfx.bone(); syncHud();
+    }
+  }
+  if (LG.time % 0.25 < dt) syncHud();
+}
+
+function anyKey() {
+  if (!assetsReady) return;               // 资源未就绪不开局
+  if (LG.state === "title") newGame();
+  else if (LG.state === "gameover" && LG.stateT > 1.2) newGame();
+}
+</script>
+<script>
+"use strict";
+/* ================= 3D 场景（程序化建模） ================= */
+let scene, camera, renderer, trackTex;
+/* 资源加载门：纹理 + DOM 图片全部就绪才开局，标题页显示进度条（杜绝慢网络下的占位/素模） */
+const loadMgr = new THREE.LoadingManager();
+const texLoader = new THREE.TextureLoader(loadMgr);
+let assetsReady = false, texDone = 0, texTotal = 1, imgDone = 0;
+const domAssets = ["puppy.png", "btn_red.png", "btn_green.png", "chip_grey.png", "star.png", "star_o.png", "play.png"];
+const imgTotal = domAssets.length;
+function loadProgress() { return { done: texDone + imgDone, total: texTotal + imgTotal }; }
+function updateLoadingUI() {
+  const p = loadProgress();
+  assetsReady = p.done >= p.total;
+  const bar = document.getElementById("loadbar"), txt = document.getElementById("loadtxt");
+  if (bar) bar.style.width = (p.done / p.total * 100) + "%";
+  if (txt) txt.textContent = "资源加载中 " + p.done + " / " + p.total;
+  if (assetsReady && LG.state === "title") showPanel("title");
+}
+loadMgr.onProgress = (u, done, total) => { texDone = done; texTotal = total; updateLoadingUI(); };
+loadMgr.onLoad = () => updateLoadingUI();
+for (const src of domAssets) {
+  const im = new Image();
+  im.onload = im.onerror = () => { imgDone++; updateLoadingUI(); };
+  im.src = src;
+}
+const boneTex = texLoader.load("bone.png");
+/* 卡通描边：反向放大壳 */
+const outlineMat = new THREE.MeshBasicMaterial({ color: 0x2a2320, side: THREE.BackSide });
+function outline(m, th = 1.045) {
+  const o = new THREE.Mesh(m.geometry, outlineMat);
+  o.scale.set(th, th, th);
+  o.raycast = () => {};
+  m.add(o);
+  return m;
+}
+
+function makeCanvas(w, h, draw) {
+  const cv2 = document.createElement("canvas");
+  cv2.width = w; cv2.height = h;
+  const g = cv2.getContext("2d");
+  if (g) draw(g, w, h);
+  return cv2;
+}
+
+function initScene() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87CEEB);
+  scene.fog = new THREE.Fog(0x87CEEB, 60, 200);
+  camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 400);
+  camera.position.set(0, 4.1, 7.8);
+  camera.lookAt(0, 1.35, -10);
+  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x77aa55, 0.75));
+  const sun = new THREE.DirectionalLight(0xfff5e0, 0.9);
+  sun.position.set(6, 14, 5);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -18; sun.shadow.camera.right = 18;
+  sun.shadow.camera.top = 25; sun.shadow.camera.bottom = -40;
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 60;
+  scene.add(sun); scene.add(sun.target);
+
+  // 轨道地面：一张程序绘制的贴图（道砟+枕木+钢轨），滚动模拟前进
+  const laneU = x => (x + 4.4) / 8.8;
+  const cvTrack = makeCanvas(256, 256, (g) => {
+    g.fillStyle = "#8a7a6a"; g.fillRect(0, 0, 256, 256);          // 道砟
+    g.fillStyle = "rgba(0,0,0,.12)";
+    for (let i = 0; i < 40; i++) g.fillRect(Math.random()*256, Math.random()*256, 6, 5);
+    g.fillStyle = "#6b4f35";                                       // 枕木
+    for (let y = 0; y < 256; y += 21) g.fillRect(14, y, 228, 9);
+    g.fillStyle = "#cfd6da";                                       // 钢轨
+    for (const lx of LANES) for (const s of [-0.5, 0.5]) {
+      const u = laneU(lx + s) * 256;
+      g.fillRect(u - 3, 0, 6, 256);
+      g.fillStyle = "#9aa4a8"; g.fillRect(u - 3, 0, 2, 256);
+      g.fillStyle = "#cfd6da";
+    }
+  });
+  trackTex = new THREE.CanvasTexture(cvTrack);
+  trackTex.wrapS = trackTex.wrapT = THREE.RepeatWrapping;
+  trackTex.repeat.set(1, 30);
+  const track = new THREE.Mesh(
+    new THREE.PlaneGeometry(8.8, 400),
+    new THREE.MeshLambertMaterial({ map: trackTex })
+  );
+  track.rotation.x = -Math.PI / 2; track.position.z = -160;
+  track.receiveShadow = true;
+  scene.add(track);
+
+  // 两侧草地（小碎花纹理）
+  const grassTex = new THREE.CanvasTexture(makeCanvas(256, 256, (g) => {
+    g.fillStyle = "#96cf70"; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = "#8bc465";
+    for (let i = 0; i < 30; i++) g.fillRect(Math.random() * 256, Math.random() * 256, 5, 3);
+    g.fillStyle = "rgba(255,255,255,.14)";
+    for (let i = 0; i < 50; i++) g.fillRect(Math.random() * 256, Math.random() * 256, 3, 2);
+    const fl = ["#ffffff", "#ffe08a", "#ffc7dd"];
+    for (let i = 0; i < 14; i++) {
+      g.fillStyle = fl[i % 3];
+      g.beginPath(); g.arc(Math.random() * 256, Math.random() * 256, 2.2, 0, 7); g.fill();
+    }
+  }));
+  grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping;
+  grassTex.repeat.set(16, 40);
+  const grassMat = new THREE.MeshLambertMaterial({ map: grassTex });
+  for (const s of [-1, 1]) {
+    const grass = new THREE.Mesh(new THREE.PlaneGeometry(60, 400), grassMat);
+    grass.rotation.x = -Math.PI / 2;
+    grass.position.set(s * 34.4, -0.02, -160);
+    grass.receiveShadow = true;
+    scene.add(grass);
+  }
+
+  // 天空背景图（绘本风，挂在远处）
+  const skyPlane = new THREE.Mesh(new THREE.PlaneGeometry(420, 120),
+    new THREE.MeshBasicMaterial({ map: texLoader.load("sky.png"), fog: false }));
+  skyPlane.position.set(0, 30, -195);
+  scene.add(skyPlane);
+
+  buildScenery();
+  buildPlayer();
+}
+
+/* ---------- 远景：树/楼/云（循环回收） ---------- */
+const scenItems = [];
+const facadeTex = new THREE.CanvasTexture(makeCanvas(128, 128, (g) => {
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = "#9fc4d8";
+  for (let y = 12; y < 110; y += 28) for (let x = 10; x < 110; x += 26) g.fillRect(x, y, 14, 16);
+}));
+function buildScenery() {
+  const treeMat = new THREE.MeshLambertMaterial({ color: 0x3fa34d });
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+  const houseMats = [0xffd9b3, 0xffb3c8, 0xb3e0ff, 0xfff3b3, 0xd3f0d3]
+    .map(c => new THREE.MeshLambertMaterial({ color: c }));
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0xd9534f });
+  for (let i = 0; i < 26; i++) {
+    const side = i % 2 ? 1 : -1;
+    let m;
+    if (Math.random() < 0.55) {                    // 树（双层树冠更蓬松）
+      m = new THREE.Group();
+      const h = 2 + Math.random() * 2.5;
+      const crown = new THREE.Mesh(new THREE.SphereGeometry(h * 0.55, 8, 8), treeMat);
+      crown.position.y = h; m.add(crown);
+      const crown2 = new THREE.Mesh(new THREE.SphereGeometry(h * 0.38, 8, 8), treeMat);
+      crown2.position.set(h * 0.3, h * 0.8, 0.2); m.add(crown2);
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, h, 6), trunkMat);
+      trunk.position.y = h / 2; m.add(trunk);
+      [crown, crown2, trunk].forEach(p => { p.castShadow = true; outline(p); });
+    } else {                                        // 房子（带门窗立面）
+      m = new THREE.Group();
+      const w = 3 + Math.random() * 3, h = 3 + Math.random() * 4, d = 3 + Math.random() * 2;
+      const bodyMat = houseMats[i % houseMats.length];
+      const faceMat = new THREE.MeshLambertMaterial({ map: facadeTex, color: bodyMat.color });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+        [faceMat, faceMat, bodyMat, bodyMat, faceMat, faceMat]);
+      body.position.y = h / 2; m.add(body);
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.75, 1.4, 4), roofMat);
+      roof.position.y = h + 0.7; roof.rotation.y = Math.PI / 4; m.add(roof);
+      [body, roof].forEach(p => { p.castShadow = true; outline(p); });
+    }
+    m.position.set(side * (8 + Math.random() * 18), 0, -220 + Math.random() * 240);
+    scene.add(m);
+    scenItems.push({ m, side });
+  }
+  // 云
+  const cloudTex = new THREE.CanvasTexture(makeCanvas(128, 64, (g) => {
+    g.fillStyle = "rgba(255,255,255,.95)";
+    for (const [x, y, r] of [[35,40,18],[60,30,22],[90,40,18],[60,44,20]]) {
+      g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+    }
+  }));
+  for (let i = 0; i < 8; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true }));
+    sp.scale.set(14, 7, 1);
+    sp.position.set((Math.random() - 0.5) * 90, 16 + Math.random() * 14, -60 - Math.random() * 140);
+    scene.add(sp);
+    scenItems.push({ m: sp, cloud: true });
+  }
+}
+function updateScenery(dt, spd) {
+  for (const it of scenItems) {
+    it.m.position.z += spd * (it.cloud ? 0.15 : 1) * dt;
+    if (it.m.position.z > 25) {
+      it.m.position.z = it.cloud ? -200 : -220;
+      if (!it.cloud) it.m.position.x = it.side * (8 + Math.random() * 18);
+    }
+  }
+}
+
+/* ---------- 玩家：程序化 3D 小狗（复刻 IP 特征） + 影子 ---------- */
+let dog, shadowMesh;
+function buildPlayer() {
+  const fur = new THREE.MeshLambertMaterial({ color: 0xF5EDE0 });   // 奶油白绒毛
+  const furL = new THREE.MeshLambertMaterial({ color: 0xE9DBC4 });  // 浅色耳/尾
+  const red = new THREE.MeshLambertMaterial({ color: 0xE53935 });   // 红围巾
+  const dark = new THREE.MeshLambertMaterial({ color: 0x26211E });
+  const g = new THREE.Group();
+
+  // 身体（椭圆球，朝 -z 跑）
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 12), fur);
+  body.scale.set(0.9, 0.85, 1.25); body.position.y = 0.78; g.add(body);
+  // 头
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 12), fur);
+  head.position.set(0, 1.28, -0.55); g.add(head);
+  // 口鼻 + 黑鼻
+  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 10), furL);
+  muzzle.position.set(0, 1.18, -0.9); g.add(muzzle);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), dark);
+  nose.position.set(0, 1.22, -1.05); g.add(nose);
+  // 眼睛（侧面可见）
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), dark);
+    eye.position.set(s * 0.18, 1.35, -0.88); g.add(eye);
+  }
+  // 长垂耳（跑步时扑扇）
+  const ears = [];
+  for (const s of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), furL);
+    ear.scale.set(0.5, 1.35, 0.65);
+    ear.position.set(s * 0.42, 1.3, -0.45);
+    ear.rotation.z = s * 0.5;
+    g.add(ear); ears.push(ear);
+  }
+  // 围巾：项圈 + 三节飘带（向后飘）
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.13, 8, 16), red);
+  collar.position.set(0, 1.08, -0.32); collar.rotation.x = Math.PI / 2.2; g.add(collar);
+  const scarf = [];
+  for (let i = 0; i < 3; i++) {
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.24 - i * 0.03, 0.07, 0.3), red);
+    seg.position.set(0.16, 1.06, -0.08 + i * 0.27);
+    g.add(seg); scarf.push(seg);
+  }
+  // 卷尾
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), furL);
+  tail.scale.set(0.75, 0.75, 1.5);
+  tail.position.set(0, 1.02, 0.78); tail.rotation.x = -0.7; g.add(tail);
+  // 四条腿（髋关节枢轴，可摆动）
+  const legs = [];
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const hip = new THREE.Group();
+    hip.position.set(sx * 0.28, 0.58, sz * 0.42 - 0.05);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.5, 8), fur);
+    leg.position.y = -0.25; hip.add(leg);
+    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), furL);
+    paw.position.y = -0.5; hip.add(paw);
+    g.add(hip); legs.push(hip);
+  }
+  dog = { g, ears, legs, tail, scarf };
+  const parts = [];
+  g.traverse(m => { if (m.isMesh) parts.push(m); });
+  parts.forEach(m => { m.castShadow = true; outline(m, 1.05); });
+  scene.add(g);
+  const shTex = new THREE.CanvasTexture(makeCanvas(64, 64, (g) => {
+    const gr = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+    gr.addColorStop(0, "rgba(0,0,0,.4)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  }));
+  shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6),
+    new THREE.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false }));
+  shadowMesh.rotation.x = -Math.PI / 2; shadowMesh.position.y = 0.02;
+  scene.add(shadowMesh);
+}
+function updatePlayerMesh() {
+  const p = LG.player;
+  const roll = p.rolling > 0;
+  const air = p.y > 0.02;
+  const ph = LG.time * LG.speed * 1.6;
+  const g = dog.g;
+
+  // 跑步循环：对角腿成对摆动；着地才摆
+  const swinging = !air && !roll && LG.state === "play";
+  const sw = swinging ? 1 : 0;
+  dog.legs[0].rotation.x = Math.sin(ph) * 0.9 * sw + (air ? -0.6 : 0);
+  dog.legs[3].rotation.x = Math.sin(ph) * 0.9 * sw + (air ? -0.6 : 0);
+  dog.legs[1].rotation.x = -Math.sin(ph) * 0.9 * sw + (air ? 0.5 : 0);
+  dog.legs[2].rotation.x = -Math.sin(ph) * 0.9 * sw + (air ? 0.5 : 0);
+  // 耳朵扑扇（相位滞后）、尾巴摇、围巾波浪（逐节延迟）
+  dog.ears[0].rotation.x = Math.sin(ph - 0.7) * 0.35 * sw + (air ? -0.5 : 0);
+  dog.ears[1].rotation.x = Math.sin(ph - 0.7) * 0.35 * sw + (air ? -0.5 : 0);
+  dog.tail.rotation.y = Math.sin(LG.time * 9) * 0.35;
+  for (let i = 0; i < 3; i++) {
+    dog.scarf[i].rotation.x = Math.sin(ph * 0.6 - i * 0.9) * (0.25 + i * 0.12);
+    dog.scarf[i].position.y = 1.06 + Math.sin(ph * 0.6 - i * 0.9 + 1) * 0.04;
+  }
+  // 位移/姿态
+  const bob = swinging ? Math.abs(Math.sin(ph)) * 0.08 : 0;
+  g.position.set(p.x, p.y + bob, 0);
+  g.scale.set(1, roll ? 0.55 : (air ? 1.08 : 1), 1);
+  g.rotation.z = -(LANES[p.lane] - p.x) * 0.22;   // 换道侧倾
+  g.rotation.y = -(LANES[p.lane] - p.x) * 0.18;   // 换道转向前倾
+  // 受伤闪烁
+  g.visible = !(p.inv > 0 && Math.floor(LG.time * 12) % 2 === 0);
+  const sc = Math.max(0.4, 1 - p.y * 0.35);
+  shadowMesh.scale.set(sc, sc, sc);
+  shadowMesh.position.x = p.x;
+  shadowMesh.material.opacity = Math.max(0.25, 1 - p.y * 0.4);
+}
+
+/* ---------- 障碍与骨头：程序建模 ---------- */
+const trainMats = [0xe05353, 0x53a0e0, 0x53b96b, 0xe0a353]
+  .map(c => new THREE.MeshLambertMaterial({ color: c }));
+const steelMat = new THREE.MeshLambertMaterial({ color: 0xd8dde0 });
+const darkMat = new THREE.MeshLambertMaterial({ color: 0x39424a });
+
+function makeTrain(o) {
+  const g = new THREE.Group();
+  const len = o.len, mat = trainMats[o.lane % trainMats.length];
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 2.1, len), mat);
+  body.position.y = 1.4; g.add(body);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.3, len * 0.98), steelMat);
+  roof.position.y = 2.6; g.add(roof);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.35, len * 0.98), darkMat);
+  base.position.y = 0.35; g.add(base);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.6, len * 0.8), darkMat);
+  win.position.y = 1.85; g.add(win);
+  const face = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.6, 0.3), steelMat);
+  face.position.set(0, 1.3, len / 2 + 0.1); g.add(face);
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.34), darkMat);
+  shield.position.set(0, 1.8, len / 2 + 0.12); g.add(shield);
+  [body, roof, face].forEach(p => { p.castShadow = true; outline(p); });
+  return g;
+}
+const stripeTex = new THREE.CanvasTexture(makeCanvas(128, 32, (g) => {
+  g.fillStyle = "#FFD54A"; g.fillRect(0, 0, 128, 32);
+  g.fillStyle = "#333";
+  for (let x = -32; x < 128; x += 32) {
+    g.beginPath(); g.moveTo(x, 32); g.lineTo(x + 16, 0); g.lineTo(x + 32, 0); g.lineTo(x + 16, 32); g.fill();
+  }
+}));
+function makeBarrier(o) {
+  const g = new THREE.Group();
+  const postMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+  for (const s of [-0.85, 0.85]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.05, 0.12), postMat);
+    post.position.set(s, 0.52, 0); g.add(post);
+  }
+  const board = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.45, 0.1),
+    new THREE.MeshLambertMaterial({ map: stripeTex }));
+  board.position.y = 0.82; g.add(board);
+  [board, ...g.children.filter(c => c !== board)].forEach(p => { p.castShadow = true; outline(p); });
+  return g;
+}
+function makeBeam(o) {
+  const g = new THREE.Group();
+  const postMat = new THREE.MeshLambertMaterial({ color: 0x6b7a85 });
+  for (const s of [-0.95, 0.95]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.15, 2.6, 0.15), postMat);
+    post.position.set(s, 1.3, 0); g.add(post);
+  }
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.35, 0.35),
+    new THREE.MeshLambertMaterial({ color: 0xe08553 }));
+  beam.position.y = 1.75; g.add(beam);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.42),
+    new THREE.MeshBasicMaterial({ map: boneTex, transparent: true, side: THREE.DoubleSide }));
+  sign.position.y = 1.35; g.add(sign);
+  [beam, ...g.children.filter(c => c !== beam && c !== sign)].forEach(p => { p.castShadow = true; outline(p); });
+  return g;
+}
+const allMeshes = new Set();
+function ensureMesh(o) {
+  if (o.mesh) return;
+  o.mesh = o.type === OB.TRAIN ? makeTrain(o) : o.type === OB.BARRIER ? makeBarrier(o) : makeBeam(o);
+  o.mesh.position.x = LANES[o.lane];
+  scene.add(o.mesh);
+  allMeshes.add(o.mesh);
+}
+function syncWorld() {
+  const keep = new Set();
+  for (const o of LG.obs) { ensureMesh(o); o.mesh.position.z = o.z; keep.add(o.mesh); }
+  for (const b of LG.bonesArr) {
+    if (!b.mesh) {
+      b.mesh = new THREE.Sprite(new THREE.SpriteMaterial({ map: boneTex, transparent: true }));
+      b.mesh.scale.set(0.8, 0.8 * (boneTex.image ? boneTex.image.height / boneTex.image.width : 0.6), 1);
+      scene.add(b.mesh);
+      allMeshes.add(b.mesh);
+    }
+    b.mesh.position.set(LANES[b.lane], b.y + Math.sin(LG.time * 3 + b.z) * 0.1, b.z);
+    b.mesh.material.rotation += 0.03;
+    keep.add(b.mesh);
+  }
+  // 回收：数据已删除的对象，网格移出场景
+  for (const m of Array.from(allMeshes)) {
+    if (!keep.has(m)) { scene.remove(m); allMeshes.delete(m); }
+  }
+}
+</script>
+<script>
+"use strict";
+/* ================= HUD / 界面 ================= */
+function syncHud() {
+  document.getElementById("bones").textContent = LG.bones;
+  document.getElementById("lives").textContent = LG.lives;
+  document.getElementById("score").textContent = LG.score;
+}
+function showPanel(kind) {
+  const el = document.getElementById("panel");
+  const hud = document.getElementById("hud");
+  if (!kind) { el.style.display = "none"; hud.style.display = "flex"; return; }
+  hud.style.display = "none"; el.style.display = "flex";
+  if (kind === "title") {
+    if (!assetsReady) {   // 资源加载中：Logo + 进度条
+      const p = loadProgress();
+      el.innerHTML = '<div class="logo">汪汪跑酷</div>'
+        + '<div class="loadwrap"><div class="loadbar" id="loadbar" style="width:' + (p.done / p.total * 100) + '%"></div></div>'
+        + '<div class="tips" id="loadtxt">资源加载中 ' + p.done + ' / ' + p.total + '</div>';
+      return;
+    }
+    el.innerHTML = '<div class="logo">汪汪跑酷</div>'
+      + '<div class="sub">PUPPY RUN</div>'
+      + '<div class="stars"><img src="star.png"><img src="star.png"><img src="star_o.png"></div>'
+      + '<img class="hero" src="puppy.png">'
+      + '<div class="btn">▶ 开始游戏</div>'
+      + '<div class="tips">← → 换道　 ↑ 跳跃　 ↓ 滑铲<br>手机：左右滑换道 · 上滑跳 · 下滑铲</div>';
+  } else if (kind === "over") {
+    const starN = Math.min(3, 1 + Math.floor(LG.score / 4000));
+    let stars = "";
+    for (let i = 0; i < 3; i++) stars += '<img src="' + (i < starN ? "star.png" : "star_o.png") + '">';
+    el.innerHTML = '<div class="card"><div class="head">游戏结束</div>'
+      + '<div class="stars">' + stars + '</div>'
+      + '<div class="label">本局分数</div>'
+      + '<div class="score">' + LG.score + '</div>'
+      + '<div class="pillrow"><div class="pill"><img src="bone.png">× ' + LG.bones + '</div>'
+      + '<div class="pill">🏆 最高 ' + LG.best + '</div></div>'
+      + '<div class="btn">再来一次</div></div>';
+  }
+}
+
+/* ================= 相机 ================= */
+let shakeT = 0;
+function updateCamera() {
+  const px = LG.player.x;
+  camera.position.x = px * 0.55 + (shakeT > 0 ? (Math.random() - 0.5) * 0.3 : 0);
+  camera.position.y = 4.1 + (shakeT > 0 ? (Math.random() - 0.5) * 0.25 : 0);
+  camera.lookAt(px * 0.4, 1.35, -10);
+}
+
+/* ================= 主循环 ================= */
+let lastT = 0;
+function loop(t) {
+  requestAnimationFrame(loop);
+  let dt = (t - lastT) / 1000; lastT = t;
+  if (dt > 1 / 30) dt = 1 / 30;
+  if (dt < 0) dt = 0;
+  update(dt);
+  const spd = LG.state === "play" ? (LG.slowT > 0 ? LG.speed * 0.45 : LG.speed) : 0;
+  if (spd > 0) {
+    trackTex.offset.y += spd * dt / 13.33;
+    updateScenery(dt, spd);
+  }
+  if (shakeT > 0) shakeT -= dt;
+  updatePlayerMesh();
+  syncWorld();
+  updateCamera();
+  renderer.render(scene, camera);
+}
+
+/* ================= 启动 ================= */
+/* 竖屏锁定：游戏区永远是竖屏比例；横屏窗口时居中显示 9:16 舞台，两侧留边 */
+function layout() {
+  const MAX_A = 0.75;                       // 允许的最宽宽高比（约 3:4）
+  let w = innerWidth, h = innerHeight;
+  if (w / h > MAX_A) w = Math.round(h * 9 / 16);
+  const st = document.getElementById("stage");
+  st.style.width = w + "px"; st.style.height = h + "px";
+  st.style.left = Math.round((innerWidth - w) / 2) + "px";
+  st.style.top = Math.round((innerHeight - h) / 2) + "px";
+  if (renderer) {
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+}
+try { LG.best = parseInt(localStorage.getItem("runner_best")) || 0; } catch (e) {}
+initScene();
+layout();
+showPanel("title");
+addEventListener("resize", layout);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
