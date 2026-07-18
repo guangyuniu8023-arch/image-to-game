@@ -70,8 +70,7 @@
 
 **来源决策**（按优先级）：
 1. **CC0 低模库**：Quaternius（quaternius.com，自然/建筑/载具包，CC0 无需署名）、Kenney kit 系列（kenney.nl，GLB 直出）。同包/同作者选全套——混来源画风必打架
-2. 文生/图生 3D（Tripo/Meshy）：只用于库里没有的 IP 定制品，注意免费层许可（非商用或 CC BY 署名）
-3. Sketchfab 等许可混杂站：逐件核实成本高，避免
+2. Sketchfab 等许可混杂站：逐件核实成本高，避免
 
 **获取与转换管线**（kenney.nl 直链慢/断传损坏时的实战路径）：
 - GitHub 搜 CC0 镜像仓库（api.github.com/search/repositories）→ `cdn.jsdelivr.net/gh/<owner>/<repo>@<branch>/<url编码路径>` 拉单件（快且稳）
@@ -111,6 +110,11 @@ function prepModel(name, gltf) {
 
 **方法**：读图提取 IP 特征（主色、标志配饰、轮廓）→ 几何体拼装 → 程序化动画。**特征＞还原度**：配饰和配色对了就"像"，不追求解剖正确。
 
+**参考素材：三视图生成策略**——单张上传图只有一个角度，复刻侧面/背面靠猜时，先以原图为参考图出一张 turnaround sheet 当复刻依据，prompt 骨架：
+`Character turnaround sheet: the SAME <角色一句话> in THREE views — front / side / back, identical proportions, full body, neutral standing pose, white background, flat lighting, no shadows` + IP 特征锁定（毛色/配饰/眼睛）。一次出 sheet 再裁三张，比分三张生成一致性好得多。
+
+**主线就是 low poly 复刻**：体素方块（全 Box 拼装 + 像素凸眼）与描边卡通世界同源，零外部依赖、零许可问题；实测教训：AI 图生 3D 的"软陶写实风"放进卡通低模世界会打架（用户原话"跟一坨粑粑一样"），不要为"更真实"牺牲风格统一。
+
 小狗案例（约 25 个几何体）：
 - 奶油身体（球 scale 0.9/0.85/1.25）、头、口鼻、黑鼻、眼
 - 长垂耳：扁球 scale(0.5, 1.35, 0.65)
@@ -125,36 +129,6 @@ function prepModel(name, gltf) {
 - 次级运动相位滞后：耳朵 `sin(ph-0.7)`、围巾逐节 `sin(ph×0.6 - i×0.9)`——这是"活"的关键
 - 身体颠簸 `|sin(ph)|×0.08`；换道 rotation.z 侧倾 + rotation.y 微转
 - 跳跃：收腿（前 -0.6 后 +0.5）+ scale.y 1.08 拉伸；滑铲：scale.y 0.55
-
-## 角色 3D 化：图生 3D 管线（Meshy 实战验证）
-
-**先选型，再动手**——角色 3D 化有两条路，风格统一性优先于技术先进：
-- **体素方块（Minecraft/Crossy Road 风）**：全 Box 拼装 + 像素凸眼，和描边卡通世界同源，零下载零绑定，**画风一致时的首选**；实测教训：AI 图生 3D 的"软陶写实风"放进卡通低模世界会打架（用户原话"跟一坨粑粑一样"），最后还是退回体素
-- **AI 图生 3D + 绑骨动画**（下述管线）：适合写实风游戏或必须还原复杂 IP 轮廓的场景
-
-全流程（管线本身已验证，随时可用）：
-
-**1. 三视图 prompt（IP 一致的关键）**：以原角色图为参考图生成 turnaround sheet，prompt 骨架：
-`Character turnaround sheet: the SAME <角色一句话> in THREE views — front / side / back, identical proportions, full body, neutral standing pose, white background, flat lighting, no shadows` + IP 特征锁定（毛色/配饰/眼睛）。一次出 sheet 再裁三张，比分三张生成一致性好得多。
-
-**2. Meshy API 速查**（异步任务制：提交→轮询 status=SUCCEEDED→下载）：
-- 多视图图生 3D：`POST /v1/multi-image-to-3d`（image_urls 1~4 张）
-- 绑骨：`POST /openapi/v1/rigging`（注意是 /openapi/ 前缀；结果自带 `basic_animations` 走/跑 GLB，够用了不必单买动画）
-- 三个坑：① **`remove_lighting: true` 必须开**（meshy-5 默认保留烘焙光影→贴图花斑，meshy-6+去烘焙才干净）；② 绑骨限 30 万面，超了先 `POST /openapi/v1/remesh`（meshy-6 出的模经常 70 万面）；③ 生成资产**只保留 3 天**，立刻下载
-- 免费层 = CC BY 4.0，游戏内要署名（licenses.md 记账 + 标题页角标）
-
-**3. GLB 优化**（gltf-transform 三连，8MB→1.2MB 实测）：
-`resize --width 1024 --height 1024` → `simplify --ratio 0.3~0.6 --error 0.001` → `webp`（EXT_texture_webp，r147 GLTFLoader 支持）
-
-**4. 集成模式**（踩过的坑都在这）：
-- **蒙皮网格的真实尺寸要过骨骼算**（`skinnedBounds` 采样顶点 boneTransform；`Box3.setFromObject` 只算绑定姿势，差出几十倍）
-- 材质转 Lambert 平光时**顺手清掉 emissive**（AI 模型常把贴图同时塞 emissive 槽，画面发灰发粉）
-- **蒙皮描边壳弃用**：反向壳随骨骼缩放会露背脸，AI 模型自带绘制感不需要描边
-- `frustumCulled = false`：蒙皮包围盒不跟动画，防误剔除
-- 朝向实测迭代（预留 `DOG_ROT_Y` 常量，四个角度逐个截图试）
-- AnimationMixer 步频随跑速（`mixer.update(dt × speed/12)`），标题页 0.5× 慢放当橱窗
-- 加载走同一个 LoadingManager，加载门自动覆盖；角色构建放到 loadMgr.onLoad
-- 沙盒出站有白名单（Tripo API 连不通、Meshy 通），调用外部 API 前先 curl 探连通
 
 ## 卡通渲染三件套（美术升级）
 
