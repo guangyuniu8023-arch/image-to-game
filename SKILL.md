@@ -54,6 +54,8 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 
 - **2D 平台跳跃**（超级玛丽式）：[references/gdd.md](references/gdd.md)（设计基线 + 关卡配方）+ [references/game-patterns.md](references/game-patterns.md)（实现模式），机器人 `scripts/bot_harness.js`。
 - **3D 跑酷**（神庙逃亡/地铁跑酷式）：[references/runner-3d.md](references/runner-3d.md)（设计基线 + 程序化建模 + 程序化角色 IP 复刻），机器人 `scripts/runner_bot.js`，引擎 three.js r147 本地打包。
+- **消消乐**（经典 match-3）：[references/match3.md](references/match3.md)（设计基线 + 红线 + 实现模式），机器人 `scripts/bot_match3.js`。输入维度 = 点选拖拽 → controls.md 模式 C。
+- **竖版弹跳**（doodle jump 式）：[references/doodle-jump.md](references/doodle-jump.md)（设计基线 + 7 条红线 + 实现模式），机器人 `scripts/bot_doodle.js`（固定种子）。输入维度 = 单轴连续量 → controls.md 模式 B。
 - 新增游戏类型：先按 [references/new-type.md](references/new-type.md) 的五步推演产出设计说明（核心循环 → 机制基线 → 可行性红线 → 关卡/进度 → 架构与验收定义），实战验证 + 用户验收后，在 `references/` 下固化一个同结构类型包（设计基线 + 实现模式 + 配套机器人脚本），SKILL.md 通用流程不变。每个包必须实战验证过才可写入。
 
 两个已验证类型另有**完整可运行的参考实现**（汪汪主题，可直接换皮）：`templates/platformer-2d/`、`templates/runner-3d/`。模板体积大**不随 .skill 包分发**，与本 skill 同仓库获取。**若 skill 旁没有 templates/ 目录**（单独安装的包），说明无模板可用——直接走工作流一，类型包已含全部构建基线，不依赖模板。
