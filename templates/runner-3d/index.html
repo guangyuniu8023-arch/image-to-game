@@ -85,7 +85,7 @@
    BUILD 上屏用于确认用户跑的是哪个版本；
    渲染连续失败 → 自动打 runner_safe 标记重载进入兼容模式（关 AA/阴影/描边、像素比 1），
    兼容模式仍失败 → 显示错误页，绝不静默蓝屏 */
-const BUILD = "b250718-9";
+const BUILD = "b250718-10";
 const safeMode = (() => { try { return localStorage.getItem("runner_safe") === "1"; } catch (e) { return false; } })();
 function enterSafeMode() {
   if (safeMode) { fatal("当前设备/浏览器无法运行 3D 画面，请更换浏览器或设备重试"); return; }
@@ -378,31 +378,6 @@ if (gltfLoader) {
 }
 const tplReady = () => MODEL_FILES.every(f => TPL[f]);
 
-/* 玩家狗：Meshy 绑骨 3D 模型（走加载门），失败回退程序化 */
-let dogGLB = null;
-if (gltfLoader) {
-  gltfLoader.load("models/puppy_run.glb", g => { dogGLB = g; }, undefined,
-    err => console.warn("狗模型加载失败", err));
-}
-/* 蒙皮网格的真实包围盒（Box3.setFromObject 对蒙皮只算绑定姿势） */
-function skinnedBounds(root) {
-  root.updateMatrixWorld(true);
-  const min = new THREE.Vector3(1e9, 1e9, 1e9), max = new THREE.Vector3(-1e9, -1e9, -1e9);
-  const v = new THREE.Vector3();
-  root.traverse(m => {
-    if (!m.isSkinnedMesh) return;
-    const pos = m.geometry.attributes.position;
-    const step = Math.max(1, Math.floor(pos.count / 1500));
-    for (let i = 0; i < pos.count; i += step) {
-      v.fromBufferAttribute(pos, i);
-      m.boneTransform(i, v);
-      v.applyMatrix4(m.matrixWorld);
-      min.min(v); max.max(v);
-    }
-  });
-  return new THREE.Box3(min, max);
-}
-
 function makeCanvas(w, h, draw) {
   const cv2 = document.createElement("canvas");
   cv2.width = w; cv2.height = h;
@@ -589,7 +564,6 @@ function initScene() {
   scene.add(skyPlane);
 
   if (tplReady()) buildScenery();           // 模型先就绪（极少见）则直接建，否则等 loadMgr.onLoad
-  if (dogGLB) buildPlayer();
 }
 
 /* ---------- 远景：模型库（Quaternius）优先，程序化兜底（循环回收） ---------- */
@@ -760,12 +734,12 @@ function updateScenery(dt, spd) {
   }
 }
 
-/* ---------- 玩家：Meshy 绑骨 3D 小狗（GLB 优先，程序化兜底） + 影子 ---------- */
-let dog, shadowMesh, dogMixer, playerBuilt = false;
+/* ---------- 玩家：体素方块小狗（Minecraft/Crossy Road 风，全 Box 拼装） + 影子 ---------- */
+let dog, shadowMesh, playerBuilt = false;
 function buildPlayer() {
   if (playerBuilt) return;
   playerBuilt = true;
-  if (dogGLB) buildPlayerGLB(); else buildPlayerFallback();
+  buildPlayerVoxel();
 }
 function buildShadow() {
   const shTex = new THREE.CanvasTexture(makeCanvas(64, 64, (g) => {
@@ -778,120 +752,71 @@ function buildShadow() {
   shadowMesh.rotation.x = -Math.PI / 2; shadowMesh.position.y = 0.02;
   scene.add(shadowMesh);
 }
-const DOG_ROT_Y = Math.PI;                  // GLB 狗朝向校正（实测迭代）
-function buildPlayerGLB() {
-  const root = dogGLB.scene;
-  // 转 Lambert 平光：保留贴图、关掉自发光/PBR 扩展，和场景卡通平光统一
-  // （蒙皮描边壳会随骨骼缩放露背脸，弃用——该模型自带绘制感）
-  root.traverse(m => {
-    if (m.isSkinnedMesh) {
-      m.material = new THREE.MeshLambertMaterial({ map: m.material.map || null });
-      m.castShadow = true;
-      m.frustumCulled = false;               // 蒙皮包围盒不跟动画，防误剔除
-    }
-  });
-  const mixer = new THREE.AnimationMixer(root);
-  mixer.clipAction(dogGLB.animations[0]).play();
-  mixer.update(0.001);
-  const box = skinnedBounds(root);
-  const size = new THREE.Vector3(); box.getSize(size);
-  const s = 1.3 / (size.y || 1);
-  root.scale.set(s, s, s);
-  const b2 = skinnedBounds(root);
-  root.position.y = -b2.min.y;
-  const g = new THREE.Group();
-  root.rotation.y = DOG_ROT_Y;
-  g.add(root);
-  scene.add(g);
-  dog = { g, mixer };
-  dogMixer = mixer;
-  buildShadow();
-}
-function buildPlayerFallback() {
+function buildPlayerVoxel() {
   const fur = new THREE.MeshLambertMaterial({ color: 0xF5EDE0 });   // 奶油白绒毛
-  const furL = new THREE.MeshLambertMaterial({ color: 0xE9DBC4 });  // 浅色耳/尾
+  const furL = new THREE.MeshLambertMaterial({ color: 0xE9DBC4 });  // 浅色耳/尾/口鼻
   const red = new THREE.MeshLambertMaterial({ color: 0xE53935 });   // 红围巾
   const dark = new THREE.MeshLambertMaterial({ color: 0x26211E });
+  const white = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const g = new THREE.Group();
 
-  // 身体（椭圆球，朝 -z 跑）
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 12), fur);
-  body.scale.set(0.9, 0.85, 1.25); body.position.y = 0.78; g.add(body);
-  // 头
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 12), fur);
-  head.position.set(0, 1.28, -0.55); g.add(head);
+  // 身体（方块，朝 -z 跑）
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.5, 0.85), fur);
+  body.position.y = 0.72; g.add(body);
+  // 头（正脸像素眼鼻）
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.52, 0.5), fur);
+  head.position.set(0, 1.12, -0.52); g.add(head);
   // 口鼻 + 黑鼻
-  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 10), furL);
-  muzzle.position.set(0, 1.18, -0.9); g.add(muzzle);
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), dark);
-  nose.position.set(0, 1.22, -1.05); g.add(nose);
-  // 眼睛（侧面可见）
+  const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.16, 0.1), furL);
+  muzzle.position.set(0, 1.0, -0.79); g.add(muzzle);
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.06), dark);
+  nose.position.set(0, 1.06, -0.85); g.add(nose);
+  // 像素眼（凸出小方块 + 高光点，我的世界味）
   for (const s of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), dark);
-    eye.position.set(s * 0.18, 1.35, -0.88); g.add(eye);
+    const eye = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.04), dark);
+    eye.position.set(s * 0.15, 1.19, -0.775); g.add(eye);
+    const spark = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.045, 0.042), white);
+    spark.position.set(s * 0.15 - 0.025, 1.22, -0.778); g.add(spark);
   }
-  // 长垂耳（跑步时扑扇）
+  // 垂耳（扁方盒，跑步扑扇）
   const ears = [];
   for (const s of [-1, 1]) {
-    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), furL);
-    ear.scale.set(0.5, 1.35, 0.65);
-    ear.position.set(s * 0.42, 1.3, -0.45);
-    ear.rotation.z = s * 0.5;
+    const ear = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.42, 0.26), furL);
+    ear.position.set(s * 0.33, 1.06, -0.5);
+    ear.rotation.z = s * 0.12;
     g.add(ear); ears.push(ear);
   }
-  // 围巾：项圈 + 三节飘带（向后飘）
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.13, 8, 16), red);
-  collar.position.set(0, 1.08, -0.32); collar.rotation.x = Math.PI / 2.2; g.add(collar);
+  // 红围巾：项圈方块 + 三节飘带（向后飘）
+  const collar = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.18, 0.56), red);
+  collar.position.set(0, 0.97, -0.42); g.add(collar);
   const scarf = [];
   for (let i = 0; i < 3; i++) {
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.24 - i * 0.03, 0.07, 0.3), red);
-    seg.position.set(0.16, 1.06, -0.08 + i * 0.27);
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.2 - i * 0.02, 0.1, 0.26), red);
+    seg.position.set(0.14, 0.98, -0.14 + i * 0.26);
     g.add(seg); scarf.push(seg);
   }
-  // 卷尾
-  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), furL);
-  tail.scale.set(0.75, 0.75, 1.5);
-  tail.position.set(0, 1.02, 0.78); tail.rotation.x = -0.7; g.add(tail);
-  // 四条腿（髋关节枢轴，可摆动）
+  // 卷尾（小方盒上翘）
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.3), furL);
+  tail.position.set(0, 0.9, 0.55); tail.rotation.x = -0.6; g.add(tail);
+  // 四条腿（方块，髋关节枢轴可摆动）
   const legs = [];
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     const hip = new THREE.Group();
-    hip.position.set(sx * 0.28, 0.58, sz * 0.42 - 0.05);
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.5, 8), fur);
-    leg.position.y = -0.25; hip.add(leg);
-    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), furL);
-    paw.position.y = -0.5; hip.add(paw);
+    hip.position.set(sx * 0.2, 0.52, sz * 0.28 - 0.02);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.52, 0.17), fur);
+    leg.position.y = -0.26; hip.add(leg);
     g.add(hip); legs.push(hip);
   }
   dog = { g, ears, legs, tail, scarf };
   const parts = [];
   g.traverse(m => { if (m.isMesh) parts.push(m); });
-  parts.forEach(m => { m.castShadow = true; outline(m, 1.05); });
+  parts.forEach(m => { m.castShadow = true; outline(m, 1.06); });
   scene.add(g);
   buildShadow();
 }
 function updatePlayerMesh() {
-  if (!dog) return;                          // 模型未就绪（加载中）
+  if (!dog) return;                          // 角色未就绪（加载中）
   const p = LG.player;
-  if (dogMixer) {                            // GLB 绑骨狗：动画驱动
-    const roll = p.rolling > 0, air = p.y > 0.02;
-    if (LG.state === "play") {
-      if (!air && !roll) dogMixer.update(frameDt * (LG.speed / 12));   // 步频随跑速
-    } else {
-      dogMixer.update(frameDt * 0.5);        // 标题/结算页慢慢跑（橱窗效果）
-    }
-    const g = dog.g;
-    g.position.set(p.x, p.y, 0);
-    g.scale.set(1, roll ? 0.55 : (air ? 1.06 : 1), 1);
-    g.rotation.z = -(LANES[p.lane] - p.x) * 0.22;
-    g.rotation.y = -(LANES[p.lane] - p.x) * 0.18;
-    g.visible = !(p.inv > 0 && Math.floor(LG.time * 12) % 2 === 0);
-    const sc = Math.max(0.4, 1 - p.y * 0.35);
-    shadowMesh.scale.set(sc, sc, sc);
-    shadowMesh.position.x = p.x;
-    shadowMesh.material.opacity = Math.max(0.25, 1 - p.y * 0.4);
-    return;
-  }
   const roll = p.rolling > 0;
   const air = p.y > 0.02;
   const ph = LG.time * LG.speed * 1.6;
@@ -1074,8 +999,7 @@ function showPanel(kind) {
   hud.style.display = "none"; el.style.display = "flex";
   if (kind === "title") {
     const verTag = '<div style="position:absolute;right:10px;bottom:8px;font-size:11px;color:#fff;opacity:.65;'
-      + 'text-shadow:0 1px 2px rgba(0,0,0,.3)">' + BUILD + (safeMode ? " · 兼容模式" : "")
-      + '<br>3D角色 © Meshy CC BY 4.0</div>';
+      + 'text-shadow:0 1px 2px rgba(0,0,0,.3)">' + BUILD + (safeMode ? " · 兼容模式" : "") + '</div>';
     if (!assetsReady) {   // 资源加载中：Logo + 进度条
       const p = loadProgress();
       el.innerHTML = '<div class="logo">汪汪跑酷</div>'

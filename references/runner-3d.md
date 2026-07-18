@@ -118,6 +118,8 @@ function prepModel(name, gltf) {
 - 卷尾：扁球拉长上翘
 - 4 条腿：髋关节 Group 枢轴（圆柱+球爪），摆动绕 hip.rotation.x
 
+**体素变体（推荐）**：同样的部件全部换成 BoxGeometry，眼睛用凸出小方块+白色高光点（像素眼）——Minecraft/Crossy Road 味立刻到位，和描边三件套天然兼容；动画契约（ears/legs/tail/scarf 数组）完全复用，一行不用改。
+
 动画（全部 sin 驱动）：
 - 对角腿成对摆动（幅度 0.9，频率随速度）：legs[0]/[3] 同相、legs[1]/[2] 反相
 - 次级运动相位滞后：耳朵 `sin(ph-0.7)`、围巾逐节 `sin(ph×0.6 - i×0.9)`——这是"活"的关键
@@ -126,7 +128,11 @@ function prepModel(name, gltf) {
 
 ## 角色 3D 化：图生 3D 管线（Meshy 实战验证）
 
-程序化几何角色还原度有上限，IP 角色的终态是"图生 3D + 绑骨动画"。全流程：
+**先选型，再动手**——角色 3D 化有两条路，风格统一性优先于技术先进：
+- **体素方块（Minecraft/Crossy Road 风）**：全 Box 拼装 + 像素凸眼，和描边卡通世界同源，零下载零绑定，**画风一致时的首选**；实测教训：AI 图生 3D 的"软陶写实风"放进卡通低模世界会打架（用户原话"跟一坨粑粑一样"），最后还是退回体素
+- **AI 图生 3D + 绑骨动画**（下述管线）：适合写实风游戏或必须还原复杂 IP 轮廓的场景
+
+全流程（管线本身已验证，随时可用）：
 
 **1. 三视图 prompt（IP 一致的关键）**：以原角色图为参考图生成 turnaround sheet，prompt 骨架：
 `Character turnaround sheet: the SAME <角色一句话> in THREE views — front / side / back, identical proportions, full body, neutral standing pose, white background, flat lighting, no shadows` + IP 特征锁定（毛色/配饰/眼睛）。一次出 sheet 再裁三张，比分三张生成一致性好得多。
