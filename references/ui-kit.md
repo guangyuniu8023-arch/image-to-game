@@ -1,73 +1,101 @@
-# UI 套件：风格定位 → 设计令牌 → 组件实现
+# HUD/UI 生成策略：推导 → 结构 → prompt → 集成 → 验收
 
-游戏的标题页 / HUD / 结算卡不用 AI 生图（不可控、风格易散），用代码绘制（Canvas/CSS，矢量可控、任意主题化）或组件库位图。本文件含风格推导方法、令牌映射与两种实现路径的完整代码模式。
+游戏的标题页 / HUD / 结算卡与世界素材走同一条流水线：**从角色图推导 → skill 产 prompt → AI 生图底材 → 代码集成**。UI 底材用 AI 生图（质感天花板远高于代码）；**文字、数字、进度条、状态变化永远代码画**（AI 写字必糊、多版本一致性不可控）。代码绘制降级为生图失败时的回退路径。
 
-**第一原则：固定的只有可用性骨架**——触控热区 ≥44px、文字对比度 ≥4.5:1（大号字 ≥3:1）、九宫格/圆角不变形、按下态有反馈。**视觉组件不是骨架，是推导产物**。
+**第一原则：固定的只有可用性骨架**——触控热区 ≥44px、文字对比度 ≥4.5:1（大号字 ≥3:1）、九宫格/圆角拉伸不变形、按下态有反馈。**视觉组件不是骨架，是推导产物**。
 
 ## 目录
 
-- 组件获取与选用
-- 设计令牌
-- UI 主题适配策略（骨架固定，皮肤推导）
-- Canvas 集成（九宫格/按钮/Logo 字/矢量图标）
-- DOM 集成（border-image/卡片/@font-face）
-- 教训（踩过的坑）
+- ① 推导：角色图特征 → UI 四属性
+- ② 结构规范：信息架构 / 布局栅格 / 视觉层级 / 字号间距
+- ③ prompt 策略：UI 底材生图
+- ④ 集成：九宫格 / 文字叠加 / 状态 / 回退
+- ⑤ 验收：同框目检清单
+- 附录 A：风格族命名参考（推导结果的事后命名，非预选菜单）
+- 附录 B：代码绘制回退配方（玻璃拟态）
+- 附录 C：Kenney 组件清单（位图族选项）
+- 教训
 
-## 组件获取与选用
+## ① 推导：角色图特征 → UI 四属性
 
-1. 下载：`https://kenney.nl/assets/ui-pack` 页的 zip（CC0，含 License.txt，随项目保留一份）。
-2. 每个游戏只需 7 个文件（约 40KB）：
-   - `Red/Default/button_rectangle_depth_gloss.png` → `btn_red.png`（主按钮，192×64）
-   - `Green/Default/button_rectangle_depth_flat.png` → `btn_green.png`（次按钮）
-   - `Grey/Default/button_rectangle_depth_border.png` → `chip_grey.png`（HUD 胶囊）
-   - `Yellow/Default/star.png` / `star_outline.png` → 星级评价
-   - `Extra/Default/icon_play_dark.png` → 播放图标（可选，也可用代码画三角）
-   - `Font/Kenney Future.ttf` → `kenney.ttf`（数字/英文显示字体）
-3. 这些 PNG 是纯色索引图，只有几百字节——**体积小不是损坏**，用 `file` 验证尺寸即可。
+复用 assets.md 的角色图特征提取表与主题域（不重新看图），加游戏类型，推导四属性写进 GDD：
 
-## 设计令牌
+| UI 属性 | 推导规则（从特征来，不查表） |
+|---|---|
+| **线条** | 角色描边粗 → UI 粗描边；角色细线/无描边 → UI 细线或无线框 |
+| **质感** | 赛璐璐哑光 → 平涂+硬影；厚涂/光影/梦幻 → 渐变+发光+玻璃感；水彩/手绘 → 纸纹+铅笔线 |
+| **形状** | 角色圆润 → 大圆角（12~16px），圆润到底 → **胶囊**（radius=h/2，适合 chip/主按钮）；角色锐利/写实 → 小圆角（4~8px）或切角 |
+| **密度** | 由类型定：快节奏反应类（平台/跑酷/弹跳）→ HUD 极简（≤3 元素）；策略/益智类 → 可面板化多元素 |
 
-所有 UI 从令牌取值，且**主色取自角色**（用 extract_palette.py），换主题整套 UI 自动跟换：
+推导结果可事后命名为某个风格族（附录 A），但**命名是结果不是起点**——禁止反过来"从族谱里选一个再套"。
 
-| 令牌 | 值（汪汪主题） | 用途 |
-|---|---|---|
-| 主色 | `#E53935`（围巾红） | 标题条、主按钮、强调 |
-| 主色深 | `#B33A2B` / `#8E2F23` | 描边、厚度层 |
-| 底色 | `#FFF8EC`（奶油） | 卡片、chip |
-| 描边/文字 | `#6D4C41` / `#4E342E`（深棕） | 全部描边、正文 |
-| 辅助 | `#7CB342`（草绿） | 次要按钮 |
+## ② 结构规范（类型无关，管结构不管皮肤）
 
-规则三条：**颜色全部来自令牌；组件统一圆角/描边宽/底部实色投影（`0 5px 0 深色`）；图标统一矢量风格**。
+1. **信息架构**：常驻 HUD 只放"影响本局决策的信息"（分数/步数/目标/生命）；音效/重开/提示等收进角落小号按钮。**真实反例**：星光少女 HUD 曾并排放"提示/重开/音效"三个大按钮，视觉噪音压过棋盘。
+2. **布局栅格**：常驻数值 HUD 带 ≤10% 屏高；角落幽灵小钮（提示/重开/音效）可延伸至 ~16%，不计入；中部游戏区；底部触控区（虚拟键热区，见 controls.md）。各区不互压、不遮挡游戏内容。
+3. **视觉层级**：每屏主行动点 ≤1（唯一发光主按钮）；关键数值 > 次信息 > 装饰。
+4. **组件清单与状态**：主按钮 / 次按钮（幽灵）/ HUD 小钮 / 面板 / chip / 进度条 / 弹窗。每个组件三态：正常 / 按下（提亮或变暗 15%，代码做，不让 AI 画多版本）/ 禁用（灰化 40%）。
+5. **字号阶梯** 28 / 20 / 16 / 13；**间距基数** 8px；圆角按①推导。
 
-## UI 主题适配策略（风格定位 → 令牌 → 组件——UI 必须"从角色里长出来"）
+## ③ prompt 策略：UI 底材生图
 
-**第 0 步：UI 风格定位（先于取色，决定组件形态与质感）**。从主题推导 UI 视觉语言族，再决定组件怎么实现：
+底材清单按②的组件清单产出（缺什么生成什么，不固定）：主按钮底、面板底、chip 底、标题装饰、icon 组。
 
-| 主题气质 | UI 风格族 | 组件实现路径 |
-|---|---|---|
-| 美式 Q 版/粗线条卡通（汪汪式） | 粗描边卡通 | Kenney 位图 + 重着色（见下） |
-| 梦幻/二次元/清透（星光少女式） | **玻璃拟态**：半透深底 + 1px 细边 + 微发光 + 渐变 | **代码绘制**（Canvas/CSS，配方见下） |
-| 像素/复古 | 硬边像素块 | 代码绘制（关抗锯齿，integer 缩放） |
-| 手绘/纸感 | 纸纹 + 铅笔线 | AI 素材 + 代码混合 |
+```text
+[与角色图同画风描述], game UI [组件名] asset, [①推导的质感描述],
+[①推导的形状描述], dominant color [令牌主色 hex],
+matching the art style of the reference image,
+transparent background, no text, no letters, no words,
+flat centered composition, corner decorations intact and away from edges
+```
 
-**真实教训（v1 被驳回）**：给星空二次元主题只把 Kenney 按钮重着色成冰蓝——组件还是美式粗胖卡通，用户一眼看穿"只换了颜色"。**视觉语言不换，换色就是换皮**。Kenney 只是"美式粗卡通"一个风格族的选项，不是默认解。
+硬约束（全部来自实战）：
+- **no text 三件套**（no text/no letters/no words）必须写——AI 画字必糊，文字一律代码叠加；
+- 透明底 PNG，**拿到图先验证 alpha 通道**（Pillow 查 mode=="RGBA" 且透明像素占比 >5%），不透明就重新生成；
+- **比例档选择**：透明底仅 1:1 / 3:2 / 2:3，取与组件目标宽高比最接近的档（按钮/chip 3:2、面板 1:1）；
+- 主体居中、**四角装饰完整、不触碰图像边缘**（padding 会被清理步骤裁到内容包围盒，写 padding 无效）；
+- 风格一致性靠"与角色图同画风描述 + 原图风格参考"（assets.md 流水线同款做法）；
+- 生图命令、透明底清理、424 重试纪律——引用 assets.md 五步流水线，本文件不重复（注意 clean_sprite.py 依赖 scipy.ndimage，换环境先确认）。
 
-四步（风格定位之后执行）：
+## ④ 集成
 
-1. **令牌映射（从调色板到 UI 角色）**：extract_palette.py 产出的调色板按饱和度分工——最饱和色 → 主色（主按钮/标题条/强调）；次饱和色 → 辅助色（次按钮）；中性浅 → 底色；中性深 → 描边/正文。GDD 配色令牌表照此填，禁止直接抄上一个项目。**陷阱（实战反馈）**：立绘的强调色（眼睛/发梢）往往只占约 1% 像素，median-cut 会被白发/皮肤等大面积中性色淹没，得出"全是中性色"的错误结论——**先按 S>0.3 过滤出饱和像素单独聚类，再选主色/辅助色**。
-2. **UI 位图重着色（仅位图族；代码绘制族直接按令牌绘制，跳过本步）**：Kenney 纯色索引 PNG 是固定位图——主题色定了之后，必须把按钮/chip 位图重着色到主题色相，而不是复制红/绿原图。算法（Pillow 现写即可）：转 HSV → 主色像素区 hue 替换为目标色相 → 回存 PNG。四条细则（全部来自实战）：
-   - 主色像素区判定 **S>0.2**；gloss 高光层是低饱和白色，**保留不染**；
-   - 锚定公式：`S' = S·(S_t/S̄)`、`V' = V·(V_t/V̄)`（S_t/V_t = 目标令牌色，均值在着色区上取），着色区均值精确落在令牌色上；
-   - **灰色件（chip_grey）没有 hue 可替换，会静默空转**——走"强制染色"分支：全像素设为目标 hue、S 按比例提升、纯白高光保持 S=0；
-   - **重着色后必须重命名**（btn_primary/btn_secondary）或留 mapping 注释——btn_red.png 变成粉色后文件名说谎，下个项目复制必拿错。
-3. **字体气质**：默认 Kenney Future（圆润卡通，适配大多数主题）；主题域明显不搭（写实/恐怖/硬朗科幻）时，按主题域另选一款 CC0 字体并在 GDD 注明来源与理由。
-4. **HUD 图标用主题素材**：HUD 计数图标直接贴本游戏的收集物素材图（星光少女→星星棋子、汪汪→骨头），不用通用符号（★/●）；星级评价等通用组件除外。**至少给主计数器（分数/收集数）配主题图标**；HUD 原本无图标时，动作是"新增"而非"替换"。
+```js
+/* 九宫格（源/目角块分离版）：源图角块 ss、绘制角块 sd——AI 底材尺寸远大于绘制尺寸，
+   共用 s 会把圆角弧切进拉伸区拉花。胶囊底材 ss=源高/2、sd=目高/2。 */
+function draw9(img, x, y, w, h, sd, ss) {
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  ctx.drawImage(img, 0,0,ss,ss, x,y,sd,sd);                    ctx.drawImage(img, iw-ss,0,ss,ss, x+w-sd,y,sd,sd);
+  ctx.drawImage(img, 0,ih-ss,ss,ss, x,y+h-sd,sd,sd);           ctx.drawImage(img, iw-ss,ih-ss,ss,ss, x+w-sd,y+h-sd,sd,sd);
+  ctx.drawImage(img, ss,0,iw-2*ss,ss, x+sd,y,w-2*sd,sd);       ctx.drawImage(img, ss,ih-ss,iw-2*ss,ss, x+sd,y+h-sd,w-2*sd,sd);
+  ctx.drawImage(img, 0,ss,ss,ih-2*ss, x,y+sd,sd,h-2*sd);       ctx.drawImage(img, iw-ss,ss,ss,ih-2*ss, x+w-sd,y+sd,sd,h-2*sd);
+  ctx.drawImage(img, ss,ss,iw-2*ss,ih-2*ss, x+sd,y+sd,w-2*sd,h-2*sd);
+}
+```
 
-反例（真实事故）：三个不同主题的游戏共用同一套红/绿按钮 + 同款 HUD 符号——世界素材主题化了，界面却没跟上，玩家一眼看出"换皮"。
+- **不贴皮清单**（永远代码画，别给它们用底材）：进度条、棋子选中框、提示框、飘字/popup、星级（可用主题素材图但不用 AI 底材）；
+- **文字叠加**：按钮/chip 文字代码 fillText；数字用 kenney.ttf（`@font-face` + `"900 22px Kenney"`），中文系统细体（500~600）；
+- **状态**：按下 = 覆盖 `rgba(255,255,255,.15)` 或整体变暗 15%；禁用 = 灰化 + 透明度 .6；
+- **HUD 图标**：贴本游戏主题素材（星光少女→星星棋子、汪汪→骨头），不用通用符号；至少给主计数器配一个；
+- **回退**：`uiReady` 检查（complete && naturalWidth>0），失败 → 代码绘制（附录 B 配方），绝不白屏。
 
-**首次实战验证**（星光少女消消乐，2026-07-19）：银发少女立绘 → 主色冰蓝 `#5BA4E0`（眼/发梢饱和族，S>0.3 过滤后聚类得到）、辅助珊瑚粉 `#D95577`、chip 淡紫强制染色；bot 回归 WIN ✓、截图同框协调 ✓。本节四步细则即由该实战修订产出。
+## ⑤ 验收：同框目检清单
 
-**二次实战（同日，v1 被用户驳回后重做）**：弃 Kenney 位图，全 UI 改 Canvas 代码绘制玻璃拟态——玻璃面板 / 冰蓝渐变发光主按钮 / 幽灵次按钮 / 小号幽灵 HUD 按钮，bot 回归 WIN ✓，两轮审美迭代后验收。配方：
+截图（标题页 / 游戏中段 / 结算页，用游戏自带测试参数冻结目标画面后无头截图，方法见 verification.md 第 3 级）逐张目检：
+1. **一个世界测试**：UI 与角色立绘同框——质感、线条、形状语言是否像同一个游戏？（v1 驳回案例：Kenney 美式粗胖按钮配梦幻二次元立绘，只换色被一眼看穿"换皮"）；
+2. 文字无溢出、按钮文字可读（对比度达标）；
+3. 主行动点一眼可见；HUD 不压游戏内容；
+4. 触屏热区达标（截图量不出就查代码常量）。
+
+## 附录 A：风格族命名参考（推导结果的事后命名，非预选菜单）
+
+| 推导出的特征组合 | 事后叫法 |
+|---|---|
+| 粗描边 + 平涂 + 大圆角 + 哑光 | 美式粗卡通（Kenney 位图族适用） |
+| 细线/无线 + 渐变发光 + 中圆角 + 半透 | 玻璃拟态 |
+| 硬边像素 + 关抗锯齿 | 像素族 |
+| 纸纹 + 铅笔线 + 手写字感 | 手绘纸感族 |
+
+## 附录 B：代码绘制回退配方（玻璃拟态，生图失败时用）
 
 ```js
 // 玻璃面板:半透深底 + 1px 细边 + 微光
@@ -81,43 +109,15 @@ g.addColorStop(0, "#7AC8F5"); g.addColorStop(1, "#4A90D9");
 // HUD 小按钮:高 36px 幽灵款,命中区外扩 6px 保 44px 热区;按下态提亮 15%
 ```
 
-## Canvas 集成（2D 游戏）
+## 附录 C：Kenney 组件清单（美式粗卡通族的位图选项）
 
-```js
-const uiImgs = {};
-for (const n of ["btn_red","btn_green","chip_grey","star","star_o","play"]) {
-  uiImgs[n] = new Image(); uiImgs[n].src = n + ".png";
-}
-const uiReady = n => uiImgs[n].complete && uiImgs[n].naturalWidth > 0;
-
-/* 九宫格：四角不动、边与中心拉伸，任意宽不变形（chip/变宽按钮用） */
-function draw9(img, x, y, w, h, s) {
-  const iw = img.naturalWidth, ih = img.naturalHeight;
-  ctx.drawImage(img, 0,0,s,s, x,y,s,s);                 ctx.drawImage(img, iw-s,0,s,s, x+w-s,y,s,s);
-  ctx.drawImage(img, 0,ih-s,s,s, x,y+h-s,s,s);          ctx.drawImage(img, iw-s,ih-s,s,s, x+w-s,y+h-s,s,s);
-  ctx.drawImage(img, s,0,iw-2*s,s, x+s,y,w-2*s,s);      ctx.drawImage(img, s,ih-s,iw-2*s,s, x+s,y+h-s,w-2*s,s);
-  ctx.drawImage(img, 0,s,s,ih-2*s, x,y+s,s,h-2*s);      ctx.drawImage(img, iw-s,s,s,ih-2*s, x+w-s,y+s,s,h-2*s);
-  ctx.drawImage(img, s,s,iw-2*s,ih-2*s, x+s,y+s,w-2*s,h-2*s);
-}
-/* 按钮：原生 192×64 等比缩放（w/h=3）不需九宫格；uiReady 失败回退代码画圆角矩形 */
-/* Logo 字三层：厚度层(偏移+深色) → 粗描边(lineJoin=round) → 填充 */
-/* 图标：心/骨头用 path 画矢量，不用 emoji（各平台样式不统一） */
-```
-
-CSS 里 `@font-face { font-family: Kenney; src: url("kenney.ttf"); }` 后，Canvas 用 `"900 22px Kenney, sans-serif"` 显示数字。
-
-## DOM 集成（3D/其他）
-
-```css
-@font-face { font-family: Kenney; src: url("kenney.ttf"); }
-.btn  { border-image: url("btn_red.png") 24 fill / 24px; border-style: solid; border-width: 12px; }
-.chip { border-image: url("chip_grey.png") 20 fill / 20px; border-style: solid; border-width: 10px; }
-/* 卡片不需要 PNG：CSS 圆角 + 棕描边 + 红色标题条 + 底部实色投影即可 */
-```
+`https://kenney.nl/assets/ui-pack`（CC0，含 License.txt）。每游戏 7 个文件约 40KB：btn_red/btn_green（主/次按钮 192×64）、chip_grey（HUD 胶囊）、star/star_outline（星级）、icon_play_dark、Kenney Future.ttf。纯色索引图几百字节非损坏。用位图族时**必须重着色到令牌色**（算法：转 HSV → S>0.2 主色区 hue 替换 → `S'=S·(S_t/S̄)`、`V'=V·(V_t/V̄)` 锚定；gloss 低饱和高光不染；灰色件走强制染色分支；重着色后重命名 btn_primary/btn_secondary 防文件名说谎）。DOM 集成用 `border-image` 九宫格。提取主色陷阱：立绘强调色常只占 1% 像素，先按 S>0.3 过滤饱和像素单独聚类再选主色。
 
 ## 教训
 
-1. **emoji 当图标不可控**（❤ 在 iOS/安卓/桌面样式各异）——心、骨头、星星一律 SVG/path 矢量或素材图。
+1. **emoji 当图标不可控**（❤ 在 iOS/安卓/桌面样式各异）——一律 SVG/path 矢量或素材图。
 2. **白字 + 半透明浅底 = 隐形**：触控虚拟键曾因此"消失"。移动端控件用深色字 + 实色底 + 描边。
 3. **标题字不要纯白描边**：卡通 Logo = 填充 + 主题色粗描边 + 深色厚度层，三层缺一不可。
 4. UI 素材也要过"回退注入"纪律：`uiReady` 检查失败就代码回退，绝不白屏。
+5. **只换色不换视觉语言 = 换皮**（v1 被用户驳回原话"太丑了"）：组件形态质感必须由①推导，Kenney 粗胖卡通不是默认解。
+6. **AI 生图底材禁文字**（no text 三件套）：AI 画字必糊，文字永远代码叠加。

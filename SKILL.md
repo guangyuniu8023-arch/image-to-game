@@ -29,7 +29,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
    - 得到答复前不开工；严禁分多轮连环追问。
 2. **素材流水线**：按 [references/assets.md](references/assets.md) —— 主角抠图（`scripts/remove_bg.py`）、提取主色（`scripts/extract_palette.py`）、以原图为风格参考 AI 生成全套素材、清理水印与裁剪（`scripts/clean_sprite.py`）。
 3. **写一页 GDD**：已有类型按类型包模板填（平台跳跃 → [references/gdd.md](references/gdd.md)，含已验证的物理基线与关卡红线）；**新类型先按 [references/new-type.md](references/new-type.md) 五步推演定稿 GDD**（核心循环、机制基线、可行性红线、关卡/进度、架构与验收定义）再写代码。
-4. **单文件实现**：照 [references/game-patterns.md](references/game-patterns.md) 的结构写（瓦片碰撞、跳跃手感、敌人 AI、视差、合成音效、横竖屏自适应）；触屏与输入照 [references/controls.md](references/controls.md)（触屏默认、语义输入、按输入维度落模式）；标题/HUD/结算照 [references/ui-kit.md](references/ui-kit.md)（含 UI 主题适配：令牌映射 → 位图重着色 → 字体气质 → HUD 图标）。
+4. **单文件实现**：照 [references/game-patterns.md](references/game-patterns.md) 的结构写（瓦片碰撞、跳跃手感、敌人 AI、视差、合成音效、横竖屏自适应）；触屏与输入照 [references/controls.md](references/controls.md)（触屏默认、语义输入、按输入维度落模式）；标题/HUD/结算照 [references/ui-kit.md](references/ui-kit.md)《HUD/UI 生成策略》五段（推导四属性 → 结构规范 → 底材 prompt → 集成 → 同框验收）。
 5. **机器人通关验证（硬门槛）**：`node scripts/bot_harness.js <index.html>`，失败先改关卡不改机器人。
 6. **截图验收**：`scripts/make_ff_pages.py` 生成快进页 + 无头 Chromium 截图，至少验收标题/中段/终点/竖屏/横屏窗口（确认居中留边）5 张。
 7. **交付**：按通用原则第 5 条。
