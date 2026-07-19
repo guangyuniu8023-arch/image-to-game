@@ -65,6 +65,7 @@ def main():
     ap.add_argument("-o", "--output", default="contact_sheet.png")
     ap.add_argument("--cols", type=int, default=4, help="素材网格列数，默认 4")
     ap.add_argument("--exclude", default="", help="逗号分隔的文件名，从目录展开中剔除")
+    ap.add_argument("--tile", type=int, default=0, help="平铺预览：每件素材追加一格 N×N 平铺拼接（平铺重复感验收，assets.md）")
     args = ap.parse_args()
 
     excl = {s.strip() for s in args.exclude.split(",") if s.strip()}
@@ -82,7 +83,13 @@ def main():
         sys.exit("没有可拼的素材")
 
     cols = max(1, args.cols)
-    rows = math.ceil(len(files) / cols)
+    # 平铺预览模式：每件素材占两格（单件 + N×N 平铺）
+    items = []
+    for f in files:
+        items.append((f, "single"))
+        if args.tile >= 2:
+            items.append((f, f"tile{args.tile}"))
+    rows = math.ceil(len(items) / cols)
     hero_w = CELL + 60
     W = hero_w + cols * CELL
     H = max(rows * (CELL + LABEL_H), 2 * (CELL + LABEL_H))
@@ -96,13 +103,22 @@ def main():
     paste_cell(canvas, hero, 0, 0, hero_w, hh)
     label(draw, Path(args.hero).name + " [BASE]", 0, hh, hero_w, font)   # ASCII：默认位图字体不含 CJK
 
-    # 素材网格
-    for i, f in enumerate(files):
+    # 素材网格（含平铺预览格）
+    for i, (f, kind) in enumerate(items):
         gx = hero_w + (i % cols) * CELL
         gy = (i // cols) * (CELL + LABEL_H)
-        im = load_thumb(f, CELL - 2 * PAD)
-        paste_cell(canvas, im, gx, gy, CELL, CELL)
-        label(draw, f.name, gx, gy + CELL, CELL, font)
+        if kind == "single":
+            im = load_thumb(f, CELL - 2 * PAD)
+            paste_cell(canvas, im, gx, gy, CELL, CELL)
+            label(draw, f.name, gx, gy + CELL, CELL, font)
+        else:
+            n = args.tile
+            tw = CELL // n
+            for ty in range(n):
+                for tx in range(n):
+                    im = load_thumb(f, tw)
+                    canvas.paste(im, (gx + tx * tw + (tw - im.width) // 2, gy + ty * tw + (tw - im.height) // 2), im)
+            label(draw, f.name + f" x{n}x{n}", gx, gy + CELL, CELL, font)
 
     canvas.save(args.output)
     print(f"contact sheet → {args.output}  主角 1 + 素材 {len(files)} 件  {W}x{H}")

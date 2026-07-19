@@ -58,8 +58,10 @@ flat centered composition, corner decorations intact and away from edges
 
 硬约束（全部来自实战）：
 - **no text 三件套**（no text/no letters/no words）必须写——AI 画字必糊，文字一律代码叠加；
+- **no character 约束**：参考图是角色立绘时，AI 会把角色直接复刻进 UI 底材（实踩：面板底第 2 版事故）——prompt 必须带 `no character, no people`（中文 prompt：不要人物）；
+- **亮度锚（深色底材）**：AI 倾向偏亮（实踩：玻璃面板不透明区亮度 165，白字全洗白）——深色族 prompt 显式堆 `very dark / dim / low brightness`（中文：非常暗、低亮度），**拿到图测不透明区亮度 <60 才收**，过亮重新生成；
 - 透明底 PNG，**拿到图先验证 alpha 通道**（Pillow 查 mode=="RGBA" 且透明像素占比 >5%），不透明就重新生成；
-- **比例档选择**：透明底仅 1:1 / 3:2 / 2:3，取与组件目标宽高比最接近的档（按钮/chip 3:2、面板 1:1）；
+- **比例档选择**：透明底仅 1:1 / 3:2 / 2:3，取与组件目标宽高比最接近的档（按钮/chip 3:2、面板 1:1、竖排面板 2:3）；
 - 主体居中、**四角装饰完整、不触碰图像边缘**（padding 会被清理步骤裁到内容包围盒，写 padding 无效）；加 `equal transparent margin on all sides`——实测 AI 底材内容偏上 5.5~6.5px（底部留透明边），此句减少偏心，集成端 alpha 锚定兜底；
 - 风格一致性靠"与角色图同画风描述 + 原图风格参考"（assets.md 流水线同款做法）；
 - 生图命令、透明底清理、424 重试纪律——引用 assets.md 五步流水线，本文件不重复（注意 clean_sprite.py 依赖 scipy.ndimage，换环境先确认）。
