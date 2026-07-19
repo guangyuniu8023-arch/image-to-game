@@ -40,7 +40,14 @@ chromium --headless=new --no-sandbox --disable-gpu \
 
 逐张目检至少 5 张：标题页（文案不溢出）、游戏中段（地形/敌人/特效正常、主角与砖块比例符合 gdd.md 体型基线）、终点区（旗杆/建筑/台阶）、竖屏（世界贴底、HUD 完整）、横屏窗口（竖屏舞台居中、两侧留边）。
 
-**UI 对齐加验**：整图目检通过 ≠ 对齐合格——HUD chip/按钮/标题栏必须裁原生分辨率 region 放大 2~3 倍逐件验（文字上下留空差 ≤2px、icon 与文字中线共线；可用列带亮度剖面测行范围比中心）。案例与测量法见 [ui-kit.md](ui-kit.md) ⑤ 第 5 条与④钉基线铁律。
+**UI 对齐加验**：整图目检通过 ≠ 对齐合格——HUD chip/按钮/标题栏必须裁原生分辨率 region 放大 2~3 倍逐件验（文字上下留空差 ≤2px、icon 与文字中线共线）。**可执行载体**：
+
+```bash
+python3 scripts/audit_ui_align.py 截图.png --region 左chip=x,y,w,h --region 右chip=x,y,w,h
+# 任一组件偏移/留空差 >±2px 退出码 1（可接 CI/机器人）；假设与调参见脚本头注释
+```
+
+案例与原理见 [ui-kit.md](ui-kit.md) ⑤ 第 5 条与④钉基线铁律。
 
 ## 第 4 级：交付清单
 
