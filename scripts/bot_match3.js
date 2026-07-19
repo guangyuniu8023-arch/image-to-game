@@ -52,7 +52,9 @@ global.addEventListener = () => {};
 const BOT = `
 ;(function bot() {
   const need = ["G", "update", "newGame", "trySwap", "findMatches", "findAllMoves",
-    "botPickMove", "checkDeadlock", "hasMoves", "MOVES_MAX", "TARGET", "COLS", "ROWS"];
+    "botPickMove", "checkDeadlock", "hasMoves", "TARGET", "COLS", "ROWS"];
+  /* MOVES_MAX 不进清单：限时变体（match3-timed）用 TIME_MAX 替代——
+     制式探测在下方做（TIMED/MOVES_LIM），两种制式必居其一。 */
   const missing = need.filter((n) => { try { eval(n); return false; } catch (e) { return true; } });
   if (missing.length) {
     console.error("游戏代码缺少符号: " + missing.join(", "));
@@ -67,11 +69,16 @@ const BOT = `
   };
   const boardTypes = () => G.board.map(row => row.map(p => p.t).join("")).join("|");
 
+  /* 制式探测：限步（G.moves 为剩余、MOVES_MAX 存在）/ 限时（G.timeLeft 存在）。
+     限时变体（match3-timed）：moves=用步统计不限量，判负由时间心跳负责。 */
+  const TIMED = (() => { try { return typeof G.timeLeft === "number"; } catch (e) { return false; } })();
+  const MOVES_LIM = (() => { try { return MOVES_MAX; } catch (e) { return Infinity; } })();
+
   // ---- 初始棋盘不变量 ----
   newGame();
   ok(findMatches().length === 0, "初始棋盘存在现成消除");
   ok(findAllMoves().length > 0, "初始棋盘无可走步");
-  ok(G.moves === MOVES_MAX && G.score === 0, "初始步数/分数异常");
+  ok(TIMED ? (G.moves === 0 && G.timeLeft > 0) : (G.moves === MOVES_LIM && G.score === 0), "初始步数/时间/分数异常");
   console.log("INIT: 8x8 棋盘无现成消除且有可走步 ✓");
 
   // ---- 非法交换测试：不形成匹配的交换必须弹回且不扣步数 ----
@@ -110,12 +117,12 @@ const BOT = `
     steps++;
     stepUntilIdle();
     ok(G.score >= sc0, "分数倒退");
-    ok(steps <= MOVES_MAX + 2, "步数超出上限仍未结束");
+    ok(TIMED || steps <= MOVES_LIM + 2, "步数超出上限仍未结束");
   }
-  const win = G.state === "win" && steps <= MOVES_MAX;
+  const win = G.state === "win" && (TIMED || steps <= MOVES_LIM);
   console.log("WIN: " + win);
   console.log("state=" + G.state
-    + " 用步=" + steps + "/" + MOVES_MAX
+    + " 用步=" + steps + (TIMED ? "(限时制 剩余=" + G.timeLeft.toFixed(1) + "s)" : "/" + MOVES_LIM)
     + " 分数=" + G.score + "(目标 " + TARGET + ")"
     + " 最大连锁=x" + G.maxChain
     + " 洗牌=" + G.shuffles
