@@ -33,7 +33,7 @@ const moveX = clamp((keys.left ? -1 : 0) + (keys.right ? 1 : 0) + (tilt || 0), -
 
 ## 模式 A：虚拟键区实现规范
 
-按键 ≥88px 放拇指热区（屏幕下 1/3），动作键大于方向键（如 116px vs 96px），半透明（opacity .45、按下 .7），容器 `touch-action:none` 防手势冲突；**多点触控**按 `touch.identifier` 跟踪，支持"按住方向同时跳"；按键映射到与键盘同一语义变量，**松开触发与 keyup 完全相同的逻辑**（如跳跃的可变跳高截断，见 game-patterns.md"跳跃手感三件套"）。控件常驻，桌面浏览器直接可点。
+按键 ≥88px 放拇指热区（屏幕下 1/3），动作键大于方向键（如 116px vs 96px），半透明（opacity .45、按下 .7），容器 `touch-action:none` 防手势冲突（**数值来源**：88px = 触控目标下限惯例——iOS HIG 44pt / Android Material 48dp——在 540 宽舞台上的换算余量；116/96 配比与透明度档承自己验证的平台跳跃模板，用户实机验收通过；注意半透明指整键透明度，字形仍须深色实色+描边，白字+浅底会"隐形"，见 ui-kit.md 陷阱 2）；**多点触控**按 `touch.identifier` 跟踪，支持"按住方向同时跳"；按键映射到与键盘同一语义变量，**松开触发与 keyup 完全相同的逻辑**（如跳跃的可变跳高截断，见 game-patterns.md"跳跃手感三件套"）。控件常驻，桌面浏览器直接可点。
 
 ```js
 function bindBtn(el, key) {
