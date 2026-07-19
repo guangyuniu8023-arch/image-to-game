@@ -67,6 +67,8 @@ for i, c in enumerate([(220, 80, 80, 255), (80, 200, 120, 255), (90, 120, 230, 2
 r = subprocess.run(["python3", f"{S}/make_contact_sheet.py", str(tmp/"a0.png"),
                     str(tmp/"a1.png"), str(tmp/"a2.png"), "-o", str(tmp/"cs.png")], capture_output=True)
 res.append(("make_contact_sheet 出图", r.returncode == 0 and (tmp/"cs.png").exists()))
+r = subprocess.run(["python3", f"{S}/make_contact_sheet.py", str(tmp/"a0.png"), str(tmp/"a1.png"), "-o", str(tmp/"cs2.png"), "--silhouette"], capture_output=True)
+res.append(("make_contact_sheet --silhouette", r.returncode == 0 and (tmp/"cs2.png").exists()))
 
 r = subprocess.run(["python3", f"{S}/extract_palette.py", str(tmp/"a2.png")], capture_output=True)
 res.append(("extract_palette 取色", r.returncode == 0))

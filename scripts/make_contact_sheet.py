@@ -43,9 +43,22 @@ def load_thumb(path, box):
     return im
 
 
-def paste_cell(canvas, im, x, y, w, h):
-    """棋盘格底 + 居中贴图"""
-    canvas.paste(checker(w, h), (x, y))
+def to_silhouette(im):
+    """剪影化：alpha 保留、RGB 涂黑——可读性验收（剪影可辨 = 形状语言合格）"""
+    import numpy as np
+    a = np.array(im)
+    a[..., :3] = 0
+    a[..., 3] = np.where(a[..., 3] > 40, 255, 0).astype(a.dtype)
+    return Image.fromarray(a)
+
+
+def paste_cell(canvas, im, x, y, w, h, silhouette=False):
+    """棋盘格底 + 居中贴图（silhouette=True 时贴纯黑剪影，浅色底）"""
+    if silhouette:
+        canvas.paste(Image.new("RGB", (w, h), (245, 246, 250)), (x, y))
+        im = to_silhouette(im)
+    else:
+        canvas.paste(checker(w, h), (x, y))
     canvas.paste(im, (x + (w - im.width) // 2, y + (h - im.height) // 2), im)
 
 
@@ -66,6 +79,7 @@ def main():
     ap.add_argument("--cols", type=int, default=4, help="素材网格列数，默认 4")
     ap.add_argument("--exclude", default="", help="逗号分隔的文件名，从目录展开中剔除")
     ap.add_argument("--tile", type=int, default=0, help="平铺预览：每件素材追加一格 N×N 平铺拼接（平铺重复感验收，assets.md）")
+    ap.add_argument("--silhouette", action="store_true", help="剪影模式：全部素材涂黑剪影（可读性验收——纯黑轮廓下可交互元素必须可辨）")
     args = ap.parse_args()
 
     excl = {s.strip() for s in args.exclude.split(",") if s.strip()}
@@ -100,7 +114,7 @@ def main():
     # 主角区：占满左侧全高
     hh = H - LABEL_H
     hero = load_thumb(args.hero, min(hero_w - 2 * PAD, hh - 2 * PAD))
-    paste_cell(canvas, hero, 0, 0, hero_w, hh)
+    paste_cell(canvas, hero, 0, 0, hero_w, hh, silhouette=args.silhouette)
     label(draw, Path(args.hero).name + " [BASE]", 0, hh, hero_w, font)   # ASCII：默认位图字体不含 CJK
 
     # 素材网格（含平铺预览格）
@@ -109,7 +123,7 @@ def main():
         gy = (i // cols) * (CELL + LABEL_H)
         if kind == "single":
             im = load_thumb(f, CELL - 2 * PAD)
-            paste_cell(canvas, im, gx, gy, CELL, CELL)
+            paste_cell(canvas, im, gx, gy, CELL, CELL, silhouette=args.silhouette)
             label(draw, f.name, gx, gy + CELL, CELL, font)
         else:
             n = args.tile
