@@ -79,6 +79,7 @@ function draw9(img, x, y, w, h, sd, ss) {
 
 - **文字锚定（AI 底材对齐的铁律）**：AI 底材的视觉中心 ≠ 图片几何中心（高光/边框厚度让重心偏移，且每次出图位置不同）——**禁止凭感觉调文字偏移量**。用 **alpha 扫描内容中心法**：离屏 canvas 绘制底材 → getImageData 扫 alpha>128 的不透明区 → 求内容包围盒中心（需要更稳可求重心），文字锚到该中心；胶囊类文字区在内容包围盒基础上左右各再收一个圆角半径。这样换任何底材，文字都自动居中。
 - **钉基线再测量（v5 实测铁律）**：`measureText().actualBoundingBoxAscent/Descent` 是相对**当前 `ctx.textBaseline` 所指水平线**测量的，不是永远相对 alphabetic。若测量前没钉基线，上一个绘制者留下的 `middle`/`bottom` 会让 abA/abD 整体平移（v5 实测：残留 middle 时 22px Kenney 测得 3.1/11.3，真实值 14.1/0.3，文字偏上 11px，且随调用现场漂移——不同页面偏的量不同）。规矩：**先 `ctx.textBaseline="alphabetic"` 再 measureText，绘制也用同一基线**，修正量 `baseline = cy + (abA-abD)/2` 全部运行时实测、不写死系数。配套**字体加载门**：加载门放行前 `Promise.all([document.fonts.load('700 22px Kenney'), ...])`（失败也放行，回落字体指标自洽仍居中；设 ~2.5s 兜底超时），否则首帧/冻结截图帧会按过渡字体渲染定格错误。
+- **水平也要锚墨盒（铁律二，UI 变体实测）**：`textAlign="center"` 居中的只是**步进框**——首尾字形侧承不同，墨盒会偏出中心（48px Kenney 三位数实测偏 5.5px，超 ±2px 容差；30px 时也偏 ~3px）。用 `actualBoundingBoxLeft/Right`（相对锚点的左/右墨距）修正：`draw_x = cx - (abR-abL)/2`。即 inkCenter 必须是**双轴**版：垂直 `baseline = cy + (abA-abD)/2`、水平 `x = cx - (abR-abL)/2`，全部运行时实测。
 - **不贴皮清单**（永远代码画，别给它们用底材）：进度条、棋子选中框、提示框、飘字/popup、星级（可用主题素材图但不用 AI 底材）；
 - **文字叠加**：按钮/chip 文字代码 fillText；数字用 kenney.ttf（`@font-face` + `"900 22px Kenney"`），中文系统细体（500~600）；
 - **状态**：按下 = 覆盖 `rgba(255,255,255,.15)` 或整体变暗 15%；禁用 = 灰化 + 透明度 .6；
