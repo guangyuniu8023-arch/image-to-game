@@ -10,7 +10,9 @@ approval state instead of trusting prose in GDD.md.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -64,13 +66,166 @@ def require_artifact(project: Path, value: Any, label: str, problems: list[str])
         problems.append(f"{label} artifact is empty: {value}")
 
 
+def artifact_path(project: Path, value: Any, label: str, problems: list[str]) -> Path | None:
+    before = len(problems)
+    require_artifact(project, value, label, problems)
+    if len(problems) != before:
+        return None
+    return project / Path(value)
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_json_artifact(path: Path, label: str, problems: list[str]) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        problems.append(f"{label} is not valid JSON: {exc}")
+        return None
+    if not isinstance(value, dict):
+        problems.append(f"{label} root must be an object")
+        return None
+    return value
+
+
+def audit_attempt_ledger(
+    project: Path,
+    report: dict[str, Any],
+    phase: str,
+    problems: list[str],
+) -> None:
+    ledger_value = report.get("attempt_ledger")
+    ledger_path: Path | None
+    if isinstance(ledger_value, str) and ledger_value.startswith("controller://"):
+        state_dir = os.environ.get("VISUAL_AUDIT_STATE_DIR")
+        run_id = os.environ.get("VISUAL_AUDIT_RUN_ID")
+        ledger_id = ledger_value.removeprefix("controller://")
+        if not state_dir or not run_id:
+            problems.append("controller attempt ledger requires controller audit-state environment")
+            return
+        expected = hashlib.sha256(
+            f"{run_id}\0{project.resolve()}".encode("utf-8")
+        ).hexdigest()
+        if ledger_id != expected:
+            problems.append("controller attempt ledger id does not match this run/project")
+            return
+        ledger_path = Path(state_dir).resolve() / f"{ledger_id}.jsonl"
+        if not ledger_path.is_file() or ledger_path.stat().st_size <= 0:
+            problems.append("controller attempt ledger is missing or empty")
+            return
+    else:
+        ledger_path = artifact_path(
+            project, ledger_value, "visual audit attempt_ledger", problems
+        )
+    if ledger_path is None:
+        return
+    latest = 0
+    try:
+        lines = ledger_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        problems.append(f"visual audit attempt_ledger cannot be read: {exc}")
+        return
+    for index, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            problems.append(f"visual audit attempt_ledger is corrupt at line {index}")
+            return
+        if (
+            isinstance(item, dict)
+            and item.get("version") == 1
+            and item.get("phase") == phase
+            and isinstance(item.get("attempt"), int)
+            and not isinstance(item.get("attempt"), bool)
+        ):
+            latest = max(latest, item["attempt"])
+    if latest <= 0:
+        problems.append(f"visual audit attempt_ledger has no {phase} entry")
+    if report.get("attempt") != latest:
+        problems.append(
+            f"visual audit report attempt is stale ({report.get('attempt')!r} != ledger {latest})"
+        )
+
+
+def audit_visual_evidence(
+    project: Path,
+    data: dict[str, Any],
+    seed: dict[str, Any],
+    phase: str,
+    problems: list[str],
+) -> None:
+    visual = data.get("visual")
+    if not isinstance(visual, dict):
+        problems.append("visual must be an object")
+        return
+    contract_path = artifact_path(project, visual.get("contract"), "visual.contract", problems)
+    baseline_path = artifact_path(project, visual.get("baseline"), "visual.baseline", problems)
+    audit_key = "seed_audit" if phase == "seed" else "production_audit"
+    report_path = artifact_path(project, visual.get(audit_key), f"visual.{audit_key}", problems)
+    index_path = project / "index.html"
+    if not index_path.is_file():
+        problems.append("index.html is required before visual approval")
+    if not contract_path or not baseline_path or not report_path or not index_path.is_file():
+        return
+    report = load_json_artifact(report_path, f"visual.{audit_key}", problems)
+    if report is None:
+        return
+    contract = load_json_artifact(contract_path, "visual.contract", problems)
+    if contract is not None:
+        approval_artifacts = contract.get("approval_artifacts")
+        if not isinstance(approval_artifacts, list) or seed.get("frame") not in approval_artifacts:
+            problems.append("seed.frame must be listed in VISUAL_CONTRACT.json approval_artifacts")
+    if report.get("status") != "PASS":
+        problems.append(f"visual.{audit_key} must record status=PASS")
+    if report.get("phase") != phase:
+        problems.append(f"visual.{audit_key}.phase must equal {phase}")
+    audit_attempt_ledger(project, report, phase, problems)
+    if report.get("contract_sha256") != sha256(contract_path):
+        problems.append(f"visual.{audit_key} is stale: contract hash mismatch")
+    if report.get("index_sha256") != sha256(index_path):
+        problems.append(f"visual.{audit_key} is stale: index.html hash mismatch")
+    if report.get("baseline_sha256") != sha256(baseline_path):
+        problems.append(f"visual.{audit_key} is stale: baseline hash mismatch")
+    preview_report = report
+    if phase == "production":
+        seed_report_path = artifact_path(
+            project, visual.get("seed_audit"), "visual.seed_audit", problems
+        )
+        if seed_report_path:
+            loaded_seed_report = load_json_artifact(
+                seed_report_path, "visual.seed_audit", problems
+            )
+            if loaded_seed_report is not None:
+                preview_report = loaded_seed_report
+                if loaded_seed_report.get("status") != "PASS" or loaded_seed_report.get("phase") != "seed":
+                    problems.append("visual.seed_audit must record a PASS seed audit")
+                audit_attempt_ledger(project, loaded_seed_report, "seed", problems)
+                if loaded_seed_report.get("contract_sha256") != sha256(contract_path):
+                    problems.append("visual.seed_audit contract hash mismatch")
+                if loaded_seed_report.get("baseline_sha256") != sha256(baseline_path):
+                    problems.append("visual.seed_audit baseline hash mismatch")
+    preview = seed.get("composition_preview")
+    cases = preview_report.get("cases")
+    screenshots = {
+        item.get("screenshot")
+        for item in cases
+        if isinstance(cases, list) and isinstance(item, dict)
+    } if isinstance(cases, list) else set()
+    if preview not in screenshots:
+        problems.append("seed.composition_preview must be a screenshot produced by the current visual audit")
+
+
 def audit(project: Path, phase: str) -> list[str]:
     data, problems = load_manifest(project)
     if data is None:
         return problems
 
-    if data.get("version") != 1:
-        problems.append("version must equal 1")
+    if data.get("version") != 2:
+        problems.append("version must equal 2")
 
     reference_character = data.get("reference_character")
     if not isinstance(reference_character, bool):
@@ -124,6 +279,9 @@ def audit(project: Path, phase: str) -> list[str]:
     require_artifact(project, seed.get("frame"), "seed.frame", problems)
     require_artifact(project, seed.get("composition_preview"), "seed.composition_preview", problems)
     require_artifact(project, seed.get("action_beat_preview"), "seed.action_beat_preview", problems)
+    if seed.get("action_beat_preview_method") != "diagram-from-seed":
+        problems.append("seed.action_beat_preview_method must equal diagram-from-seed")
+    audit_visual_evidence(project, data, seed, phase, problems)
 
     approval = seed.get("approval")
     if not isinstance(approval, dict):
@@ -131,6 +289,9 @@ def audit(project: Path, phase: str) -> list[str]:
         return problems
     status = require_text(approval, "status", "seed.approval.status", problems)
     if phase == "seed":
+        actions = data.get("actions")
+        if not isinstance(actions, list) or actions:
+            problems.append("seed phase requires actions=[]; planned actions belong in planned_actions until approval")
         if status not in {"pending", "approved"}:
             problems.append("seed phase approval status must be pending or approved")
         return problems

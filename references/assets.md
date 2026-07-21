@@ -7,7 +7,7 @@
 本文件分两种调用模式，不能混用：
 
 - **阶段 A：GDD 设计参考**。输入用户图片事实、玩法实体和角色动作；输出角色职责候选、主题映射判据、视觉简报判据、素材职责/尺寸/锚点和 Sprite 状态设计依据。此阶段不生成正式文件，不写最终 prompt。
-- **阶段 B：素材生产与验收**。只有项目 `GDD.md` 已按 [gdd-strategy.md](gdd-strategy.md) 通过一致性门后才能进入。输入已批准的视觉简报、素材生产清单、动画决策表、生产白名单和 Sprite Contract；新角色/新类型只预览白名单内的 Seed Frame 与动作节拍，等用户批准后才继续。最终输出素材文件、归一化 Sprite 帧、root/socket 元数据、回退、preview/contact sheet 和项目 `ASSET_LEDGER.md` 对账记录。
+- **阶段 B：素材生产与验收**。只有项目 `GDD.md` 已按 [gdd-strategy.md](gdd-strategy.md) 通过一致性门，且 [visual-framing.md](visual-framing.md) 的视觉合同与最小运行时构图骨架已建立后才能进入。输入已批准的视觉简报、素材生产清单、动画决策表、生产白名单和 Sprite Contract；新角色/新类型只预览白名单内的 Seed Frame 与动作节拍，等用户批准后才继续。最终输出素材文件、归一化 Sprite 帧、root/socket 元数据、回退、preview/contact sheet 和项目 `ASSET_LEDGER.md` 对账记录。
 
 若阶段 B 发现缺少状态、尺寸与碰撞冲突、HUD 遮挡或素材没有职责，退回 GDD 修正并重新过门；禁止在生产阶段静默新增设计。
 
@@ -88,7 +88,7 @@
 1. **配色结构（60-30-10）**：意图 = 层级一眼分清。世界/背景 60%（压场）、角色敌人 30%、可交互与奖励 10%（最跳）。判据：**对比分离——明度差 ≥40 或饱和度差 ≥20，择一达标**（玻璃族走明度、卡通族走饱和度；实测玻璃砖 S36/V100 在深 V29 底上靠明度分离，死卡 S≥60 会误杀好设计）。
 2. **形状语义**：意图 = 不看字读懂威胁与奖励。收集物/奖励 → 圆/星形；敌人/障碍 → 尖角/不规则；地形/砖 → 矩形/圆角矩形。判据：剪影测试（第 6 条）。
 3. **比例与视觉权重**：意图 = 主角是主角。尺寸层级 ≤3 档；视觉复杂度随权重递减（主角细节最多、收集物极简）；色带位置可携带信息（如高分行同色带）。判据：contact sheet 目检 + 尺寸表符合设计规范。
-4. **构图规范**：意图 = 玩法区永远呼吸。背景负空间 ≥60%（玩法区上空）、焦点 ≤1；平铺件负空间 ≥30%；角色展示位三分法、焦点落上半身。判据：背景细节密度实测（玩法区显著低于装饰区，实测 0.6 vs 4.0）。
+4. **背景素材构图规范**：意图 = 背景不制造假玩法信息。用于生成背景图时，负空间 ≥60%（玩法区上空）、焦点 ≤1；平铺件负空间 ≥30%；角色单独展示图可用三分法、焦点落上半身。**这些比例只约束背景/展示素材本身，禁止直接套到最终游戏舞台或角色占屏**；最终运行时构图必须按 visual-framing.md 从玩家决策、真实 Sprite 可见像素框、目标组和 HUD 安全区推导。判据：背景细节密度实测（玩法区显著低于装饰区，实测 0.6 vs 4.0）+ 运行时视觉双门。
 5. **产出方式决策**：意图 = 精度与质感各取所长。参考角色硬门优先；其余素材中，精度>质感 → Canvas 程序化（HUD 控件/进度条/几何收集物/HSV 色变体）；质感>精度 → AI 生图（主角衍生品/敌人/氛围背景/装饰建筑）；两者都要 → 混合（AI 底材+代码叠加）。判据：按矩阵执行，不凭空选。
 6. **剪影测试（验收载体）**：意图 = 可读性终极裁判。`make_contact_sheet.py --silhouette` 全套涂黑拼图——可交互元素纯黑轮廓必须可辨；碎屑/残影无处遁形（实案：launch 帧顶边碎块被抓）。判据：剪影拼图目检全可辨、无碎块。
 
@@ -273,7 +273,7 @@ before/after 对照（shmup 背景实案）：
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "reference_character": true,
   "role": "A",
   "user_requested_code_only": false,
@@ -284,20 +284,30 @@ before/after 对照（shmup 背景实案）：
     "frame": "assets/character-seed.png",
     "composition_preview": "evidence/seed-in-game.png",
     "action_beat_preview": "evidence/action-beats.png",
+    "action_beat_preview_method": "diagram-from-seed",
     "approval": {"status": "pending", "evidence": ""}
+  },
+  "planned_actions": [
+    {"name": "jump", "role": "M", "beats": ["起势", "腾空", "落点"]}
+  ],
+  "visual": {
+    "contract": "VISUAL_CONTRACT.json",
+    "baseline": "evidence/visual-baseline.json",
+    "seed_audit": "evidence/visual-seed-audit.json",
+    "production_audit": "evidence/visual-production-audit.json"
   },
   "actions": []
 }
 ```
 
-1. 用上传角色图作为 reference 调用当前图片生成/编辑工具，先生成一张**游戏内待机/起势 Seed Frame**，保留原图身份、轮廓族、配色、服饰/标志元素，但姿态和视角服务玩法。Pi 环境必须实际调用 `image_generation_tool.py --reference-image <上传图>`；不得仅在 manifest 填工具名。
-2. 同时做一张游戏构图预览，显示角色实际尺寸、玩法区、判定点和动作节拍；透明单图不能独立代替。
-3. 运行 `python3 scripts/audit_character_production.py --project <项目目录> --phase seed`。PASS 后把 Seed + 构图 + 生产白名单动作节拍给用户看一次，然后**停止并等待批准**。批准不扩张白名单；未批准不得生成整条、分配索引、实现正式角色或宣称完成。
+1. 先完成 `GDD.md`、静态 PASS 的 `VISUAL_CONTRACT.json` 和含 `window.__game.visualAudit.runCase` 的最小真实骨架，再用上传角色图作为 reference 调用当前图片生成/编辑工具，生成一张**游戏内待机/起势 Seed Frame**，保留原图身份、轮廓族、配色、服饰/标志元素，但姿态和视角服务玩法。Pi 环境必须实际调用 `image_generation_tool.py --reference-image <上传图>`；适配器会在 API 请求前检查上述前置物，不能先生成再补骨架，也不得仅在 manifest 填工具名。
+2. 把 Seed 临时接入 visual-framing.md 要求的最小真实构图骨架，使用正式舞台、投影、相机、HUD 安全区和 Sprite 可见像素框生成游戏构图预览；透明单图或手工拼图不能代替。动作节拍预览是 `diagram-from-seed`：复用同一张 Seed 做轮廓、箭头、节拍格和事件说明，**不是新动作美术**，此阶段禁止为 crouch/jump/land 等姿态调用生图工具。
+3. Seed 阶段 `CHARACTER_PRODUCTION.json.actions` 必须是空数组；白名单动作名称与节拍只写 `planned_actions`，项目中不得提前出现动作 raw、strip 或 frames。依次运行 `audit_visual_contract.py`、`audit_visual_runtime.js --phase seed`、`audit_character_production.py --phase seed`。`seed.composition_preview` 必须指向本次视觉运行时报告产生的 case 截图，三个门都 PASS 后把 Seed + 构图 + 生产白名单动作节拍给用户看一次，然后**停止并等待批准**。批准不扩张白名单；未批准不得生成整条、逐帧生成、分配正式索引、扩展正式角色实现或宣称完成。
 4. 记录 `ASSET_LEDGER.md` 的 Seed 文件、prompt、构图图、批准日期/消息和版本。同身份只换已批准色变体可不重复停顿。
 
 ### 3. 单动作整条生成
 
-每个动作用一次编辑请求生成一条水平 strip，禁止逐帧单独生成。Prompt 必须锁定：同一角色、同朝向、同轮廓族、同配色/服饰比例、透明底、确切帧数和单行等分格，无场景/文字/海报构图。Action 段逐帧写 Contract 的动作节拍。
+每个动作用一次编辑请求生成一条水平 strip，禁止逐帧单独生成。Prompt 必须锁定：同一角色、同朝向、同轮廓族、同配色/服饰比例、透明底、确切帧数和单行等分格，无场景/文字/海报构图。Action 段逐帧写 Contract 的动作节拍。生图接口不支持理想 strip 比例时，改用其支持的最接近横向比例并在画布留透明边距（2 帧优先 3:2，3~4 帧优先 16:9）；禁止因此拆成逐帧请求。
 
 生产色底：环境无真透明编辑时，用不与角色冲突的纯色 chroma key，本地去底后再归一化；尾骨、毛发、半透明等复杂边缘去底失败时停下，不用糙边帧进游戏。
 
@@ -338,7 +348,7 @@ python3 scripts/audit_sprite_frames.py --frames-dir <sprites/action> --expected 
 python3 scripts/audit_character_production.py --project <项目目录> --phase production
 ```
 
-只有该门与逐动作 `audit_sprite_frames.py` 同时 PASS，正式角色才可入引擎。
+正式版本先运行 `audit_visual_runtime.js --phase production --baseline <批准基线>`，再运行本门。只有视觉正式门、该门与逐动作 `audit_sprite_frames.py` 同时 PASS，正式角色才可交付。
 
 平台跳跃播放实例见 [platformer-patterns.md](platformer-patterns.md) 的“跑步序列帧动画”；其他类型按项目 GDD 的事件映射实现。
 

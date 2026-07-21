@@ -7,7 +7,7 @@
 - 第 0 级：skill 自检
 - 第 1 级：设计与产物门
 - 第 2 级：语法、加载与类型机器人
-- 第 3 级：关键状态截图与视觉自评
+- 第 3 级：运行时构图/镜头门与视觉自评
 - 第 4 级：交付清单
 - 失败排查顺序
 
@@ -26,11 +26,18 @@ bash scripts/selfcheck.sh
 确认项目根存在：
 
 - `GDD.md`：覆盖通用八模块，写明类型包继承项、项目调整项、来源和不适用理由；
+- `VISUAL_CONTRACT.json`：按 [visual-framing.md](visual-framing.md) 从本次需求推导，不含镜头表单或“游戏类型 → 固定镜头”路由；
 - `ASSET_LEDGER.md`：每件素材的职责、文件、生产方式、prompt/配方、日期、版本和验收状态；
-- 参考角色硬门适用时存在 `CHARACTER_PRODUCTION.json`，并在交给用户看 Seed 前运行 `python3 scripts/audit_character_production.py --project <项目目录> --phase seed`；
+- 参考角色硬门适用时存在 version 2 `CHARACTER_PRODUCTION.json`；交给用户看 Seed 前依次运行视觉合同、Seed 运行时和角色生产三道门；
 - `index.html` 和 GDD 素材清单中声明的文件。
 
-逐项核对玩法—角色—素材—Sprite—HUD—验证闭环。对任何承担动画职责的角色检查：
+先运行：
+
+```bash
+python3 scripts/audit_visual_contract.py --project <项目目录>
+```
+
+逐项核对玩法—角色—素材—Sprite—HUD—视觉策略—验证闭环。对任何承担动画职责的角色检查：
 
 - GDD 模块 6 存在动画决策表和生产白名单；只有通过四道必要性门的 M 与必要 S 动作进入 Sprite Contract；
 - 游戏加载表、状态机、强制测试状态中的每个角色动作都能追溯到生产白名单，不存在生产阶段补出的状态；
@@ -92,10 +99,29 @@ node scripts/run_bot_guard.js --timeout-ms 10000 -- node <项目机器人.js> <i
 
 - CLI：一次完整成功路径、一次代表性失败路径、一次边界/判定宽度测试；固定种子下结果必须可复现。
 - 浏览器：确认页面加载、一次真实输入链和控制台零异常；不让自动化真实等待整局动画。
-- 视觉：标题、核心动作中段、终局三类主证据；横屏适配可复用其中一个状态。存在白名单 M 动作时，再补起势/事件帧/收势证据。
+- 视觉：标题、核心动作中段、终局三类主证据；横屏适配可复用其中一个状态。存在白名单 M 动作时，再补起势/事件帧/收势证据。若视觉合同包含参考系敏感或重新取景事件，再补输入前/动作中、镜头过渡中、收敛后三类确定性 case；这些 case 由需求推导，不按类型固定添加。
 - 把本轮截图组成一张 contact sheet，一次性交给 VLM 或人工自评；只有阻断性问题才重截受影响状态，不因微小 HUD 调整全量重拍。
 
-## 第 3 级：关键状态截图与视觉自评
+## 第 3 级：运行时构图/镜头门与视觉自评
+
+Seed 审批前运行：
+
+```bash
+node scripts/run_bot_guard.js --timeout-ms 10000 -- \
+  node scripts/audit_visual_runtime.js --project <项目目录> --phase seed \
+  --out <项目目录>/evidence/visual-seed-audit.json
+```
+
+正式交付前运行：
+
+```bash
+node scripts/run_bot_guard.js --timeout-ms 10000 -- \
+  node scripts/audit_visual_runtime.js --project <项目目录> --phase production \
+  --baseline <项目目录>/evidence/visual-baseline.json \
+  --out <项目目录>/evidence/visual-production-audit.json
+```
+
+两次都必须直接打开项目 `index.html`，调用真实 `window.__game.visualAudit.runCase`。运行时门检查目标 viewport 与 probe 完全一致、必须可见对象、world/HUD 空间、可见像素/几何测量口径、世界实体的 HUD 遮挡、锁定漂移、过渡收敛、有限坐标和批准基线漂移；HUD 实体只检查视口可见性，不得参与世界对象组或对自身触发遮挡失败。报告、合同、`index.html` 与 baseline 使用哈希绑定，角色审批门还会校验报告 attempt 等于 sidecar 账本中该阶段的最新次数；旧截图、旧 PASS 报告或先 PASS 后在别处失败都不能通过当前构建。
 
 截图状态由项目 GDD 模块 8 决定，至少覆盖：
 
@@ -137,7 +163,7 @@ node scripts/cdp_shot.js <url> <out.png> \
 - 滚动背景必须停在接缝位于屏中的状态，检查 prompt 均匀构图、mirror-wrap 和 cover 适配；
 - HUD chip、按钮和标题栏裁原生 region 放大 2~3 倍检查，文字留空差 ≤2px、icon 与文字中线共线；可用 `scripts/audit_ui_align.py`。
 
-机检 PASS 后逐张诚实自评：角色存在感、呼吸与空旷、世界观违和、构图避让、职责可读、动作节拍/socket 交接、字体/渲染/色系是否打架。机器人通关、帧审计 PASS 都不能覆盖“动作不可读/画面难看”；任何“不行/不确定”先修改再交付。
+机检 PASS 后把当前视觉 cases 合成一张 contact sheet，交给 VLM 或人工逐张诚实自评：角色存在感、目标/路径判断、呼吸与空旷、镜头移动是否突兀、世界观违和、构图避让、职责可读、动作节拍/socket 交接、字体/渲染/色系是否打架。VLM 只负责观感，不代替几何和轨迹硬门。机器人通关、帧审计 PASS 都不能覆盖“动作不可读/画面难看”；任何“不行/不确定”按 visual-framing.md 分类后只修所属子系统。运行时报告的 `attempt` 由固定账本累计；Pi 正式任务使用控制器侧账本，项目 sidecar 只作普通环境回退。首次加两轮修复仍失败就停止并报告证据；不得删除或换名报告绕过次数门，修改合同或换输出路径也不能归零，ready 前页面异常应直接从报告修复。
 
 ## 第 4 级：交付清单
 
@@ -148,7 +174,7 @@ node scripts/cdp_shot.js <url> <out.png> \
 
 ## 失败排查顺序
 
-1. 失败的是设计门、资源门、规则断言、机器人通关还是视觉状态？先确定层级。
+1. 失败的是设计门、资源门、规则断言、机器人通关、静态视觉合同、运行时轨迹还是 VLM 观感？先确定层级。
 2. 对照项目 GDD 的红线、数据不变量和 WIN/LOSE 定义，不跨类型套参数。
 3. 检查实现是否保持 GDD 的输入、状态、尺寸/锚点、碰撞、HUD 和回退契约。
 4. 随机类型先固定种子复现；动画类型先固定 dt；3D 类型同时看性能和 WebGL 防御。
