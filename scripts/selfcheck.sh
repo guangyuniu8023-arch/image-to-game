@@ -4,6 +4,7 @@
 # 为什么有这个脚本：skill 自进化（变体积累/泛化/新工具）只加不改，但脚本、
 # 模板、机器人会被编辑——回退只可能从这里进来。本脚本把"旧能力还活着"
 # 变成一条命令：机器人回归（模板+参考项目）+ 工具合成夹具冒烟 + 文档断链检查。
+# 源码仓库有 templates/ 时硬验现有模板；不带模板的 .skill 分发包明确 SKIP。
 # 参考项目（match3/doodlejump 等无模板的类型）默认取仓库同级目录，缺失则 SKIP 不判负。
 set -u
 cd "$(dirname "$0")/.."
@@ -13,9 +14,17 @@ bad()  { echo "  ✗ $1"; FAIL=1; }
 skip() { echo "  - $1（SKIP）"; }
 
 echo "== A. 机器人回归（类型能力硬门槛）=="
-if node scripts/bot_platformer.js templates/platformer-2d/index.html 2>&1 | grep -q "WIN: true"; then
-  ok "platformer-2d 模板 bot WIN"
-else bad "platformer-2d 模板 bot 未通关"; fi
+if [ -d templates ]; then
+  if node scripts/bot_platformer.js templates/platformer-2d/index.html 2>&1 | grep -q "WIN: true"; then
+    ok "platformer-2d 模板 bot WIN"
+  else bad "platformer-2d 模板 bot 未通关"; fi
+
+  if node scripts/runner_bot.js templates/runner-3d/index.html 120 >/dev/null 2>&1; then
+    ok "runner-3d 模板 bot 存活"
+  else bad "runner-3d 模板 bot 失败"; fi
+else
+  skip "templates/ 未随 .skill 分发，仓库模板机器人未检"
+fi
 
 for proj in ../match3 ../match3-timed ../doodlejump; do
   name=$(basename "$proj")
@@ -32,10 +41,6 @@ for proj in ../match3 ../match3-timed ../doodlejump; do
         && ok "$name bot WIN" || bad "$name bot 未通关";;
   esac
 done
-
-if node scripts/runner_bot.js templates/runner-3d/index.html 120 >/dev/null 2>&1; then
-  ok "runner-3d 模板 bot 存活"
-else bad "runner-3d 模板 bot 失败"; fi
 
 echo "== B. 工具冒烟（合成夹具，即造即测）=="
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
@@ -210,7 +215,9 @@ D_RES=$(python3 - <<'PYEOF'
 from pathlib import Path
 
 problems = []
-docs = [Path("SKILL.md"), Path("README.md")] + sorted(Path("references").glob("*.md"))
+docs = [Path("SKILL.md")] + sorted(Path("references").glob("*.md"))
+if Path("README.md").exists():
+    docs.insert(1, Path("README.md"))
 scripts = sorted(Path("scripts").glob("*.js")) + sorted(Path("scripts").glob("*.py"))
 texts = {p: p.read_text(encoding="utf-8") for p in docs + scripts}
 
@@ -223,6 +230,7 @@ forbidden = {
     "new-type.md 的消消乐范例": "已删除的新类型示例",
     "idle/move/action/hurt/win/lose": "把候选状态当默认动作清单",
     "待机 + 接取/持有/蓄力/发射/受击等必要动作": "固定的驱动者动作清单",
+    "2D 模板：主角 + 跑步帧": "把平台跳跃素材契约误当全部 2D 模板默认清单",
 }
 for p, text in texts.items():
     for token, label in forbidden.items():
@@ -247,7 +255,8 @@ required = {
                                          "固定 `dt`", "scripts/run_bot_guard.js", "布尔值 `true`", "真正截图前", "简单 H5 快速验证档"],
     Path("SKILL.md"): ["## 类型注册表", "scripts/bot_platformer.js", "scripts/bot_match3.js", "scripts/bot_doodle.js", "scripts/runner_bot.js",
                        "动画最小充分集", "动画决策表", "生产白名单", "白名单动作节拍预览",
-                       "简单单循环 H5", "scripts/run_bot_guard.js"],
+                       "简单单循环 H5", "scripts/run_bot_guard.js", "所选模板的素材接口",
+                       "不得仅按“2D / 3D”", "不得为凑模板接口新增动作", "新增模板"],
 }
 for p, tokens in required.items():
     for token in tokens:
