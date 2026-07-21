@@ -19,7 +19,7 @@ else bad "platformer-2d 模板 bot 未通关"; fi
 
 for proj in ../match3 ../match3-timed ../doodlejump; do
   name=$(basename "$proj")
-  if [ ! -f "$proj/index.html" ]; then skip "$name（参考项目不在同级，未检）"; continue; fi
+  if [ ! -f "$proj/index.html" ]; then skip "${name}（参考项目不在同级，未检）"; continue; fi
   case "$name" in
     doodlejump)
       w=0

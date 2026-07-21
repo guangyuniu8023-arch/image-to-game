@@ -1,6 +1,6 @@
 ---
 name: image-to-game
-description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并支持后续迭代与换皮。图片主体做主角、AI 生成全套同画风主题素材；已有类型包：2D 平台跳跃、3D 跑酷。当用户要求"做个小游戏 / 类似超级玛丽 / 平台跳跃 / 跑酷 / 地铁跑酷 / 3D游戏"，或要"修改 / 修 bug / 换素材 / 换主题 / 加功能"已有游戏时使用。涵盖照片抠图、AI 素材生成与水印清理、角色跑步序列帧（2×2 图切 4 帧）、一页纸游戏设计（GDD）、Canvas/three.js 实现、卡通渲染（描边/阴影/纹理）、Kenney UI 套件与设计令牌、资源加载门、机器人自动验证、竖屏锁定布局、版本交付。
+description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并支持后续迭代与换皮。图片主体做主角、AI 生成全套同画风主题素材；已有类型包：2D 平台跳跃、3D 跑酷。当用户要求"做个小游戏 / 类似超级玛丽 / 平台跳跃 / 跑酷 / 地铁跑酷 / 3D游戏"，或要"修改 / 修 bug / 换素材 / 换主题 / 加功能"已有游戏时使用。涵盖照片抠图、AI 素材生成与水印清理、角色跑步序列帧（2×2 图切 4 帧）、通用游戏设计（GDD）策略、Canvas/three.js 实现、卡通渲染（描边/阴影/纹理）、Kenney UI 套件与设计令牌、资源加载门、机器人自动验证、竖屏锁定布局、版本交付。
 ---
 
 # Image to Game
@@ -18,18 +18,19 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 4. 视觉验收靠同步快进截图（`scripts/make_ff_pages.py`），不靠"等几秒再截"。
 5. 每轮结束三件事：**交付 → 快照 → 备份**。意图固定，路径与工具随环境替换（见"环境适配"一节）：交付 = 成果放进**持久且用户可访问**的目录（每个项目独立子目录，`index.html` 在根）；快照 = 环境有版本工具就调用；备份 = 源码复制到持久工作区，不能只留在临时目录。
 6. **所有游戏竖屏锁定**：游戏区永远是手机竖屏比例，横屏窗口时居中显示 9:16 舞台、两侧留边，不做横屏布局（实现见各类型包）。
-7. **2D 有左右移动的游戏必须配跑步序列帧**（每状态 4 帧，一张 2×2 图切出）：生成与切帧见 [references/assets.md](references/assets.md)，播放代码见类型包。
+7. **Sprite 由角色职责和动作状态推导**：A 操作主体若在 2D 中左右奔跑，move 状态必须配 4 帧 A→B→C→A 序列；B 主体驱动者优先做发球/装填/受击等事件帧；C 看板娘做事件联动，不强造跑步帧。生成与切帧见 [references/assets.md](references/assets.md)，播放代码见类型包。
 8. **必须有资源加载门**：素材全部 `complete` 前不开局（显示加载进度），加载失败也照常放行（走各自的代码回退），绝不白屏也绝不占位圈开局；**字体也在门内**（`document.fonts.load` 完成后放行，失败兜底不卡门），否则首帧按过渡字体渲染、冻结截图帧定格错位。UI 策略见 [references/ui-kit.md](references/ui-kit.md)《HUD/UI 生成策略》五段（推导 → 结构 → 底材 prompt → 集成 → 验收；AI 生图底材优先，Kenney 位图族仅美式粗卡通风格或回退用）。
+9. **GDD 决定“做什么、为什么”，reference 决定“怎么做”**：GDD 必须先闭合玩法、素材系统、Sprite 状态与 HUD/UI 信息设计；[references/assets.md](references/assets.md) 负责把已定设计生产成素材，[references/ui-kit.md](references/ui-kit.md) 负责把已定 HUD 方案生成、集成并验收。禁止先批量生图再反推玩法和界面。
 
 ## 工作流一：0-1 创建（七步）
 
-1. **分析图片与需求**：read_file 看图，定主角、按 assets.md 的"角色图驱动策略"填特征提取表（形态类别/画风/主色/标志性元素/世界观线索），再按"主题推导策略"定收集物/敌人/障碍/终点——角色的标志性元素优先做进素材。**图片是硬门槛：用户未附图就先索要，拿到图再开工**（不支持纯文本做游戏）。**类型判断（询问门）**：
+1. **分析图片与需求**：read_file 看图，按 assets.md 的"角色图驱动策略"填特征提取表（形态类别/画风/描边/主色/标志性元素/世界观线索），把收集物/敌人/障碍/终点等先记为**设计假设**，不在此时生成正式素材。**图片是硬门槛：用户未附图就先索要，拿到图再开工**（不支持纯文本做游戏）。**类型判断（询问门）**：
    - 用户已指明类型（"超级玛丽式""类似 XX""XX 那样的"）→ 不问，直接做；
    - 只说"做个小游戏"没提类型 → 用 ask_user **一次性**问清：游戏类型为主（选项结合图片主题给 2-4 个具体的，如"横版闯关（类似超级玛丽）/ 3D 跑酷（类似地铁跑酷）"，标注推荐项），最多再加一个难度/受众问题；
    - 得到答复前不开工；严禁分多轮连环追问。
-2. **素材流水线**：按 [references/assets.md](references/assets.md) —— 主角抠图（`scripts/remove_bg.py`）、提取主色（`scripts/extract_palette.py`）、以原图为风格参考 AI 生成全套素材、清理水印与裁剪（`scripts/clean_sprite.py`）。
-3. **写一页 GDD**：已有类型按类型包模板填（平台跳跃 → [references/gdd.md](references/gdd.md)，含已验证的物理基线与关卡红线）；**新类型先按 [references/new-type.md](references/new-type.md) 五步推演定稿 GDD**（核心循环、机制基线、可行性红线、关卡/进度、架构与验收定义）再写代码。
-4. **单文件实现**：照 [references/game-patterns.md](references/game-patterns.md) 的结构写（瓦片碰撞、跳跃手感、敌人 AI、视差、合成音效、横竖屏自适应）；触屏与输入照 [references/controls.md](references/controls.md)（触屏默认、语义输入、按输入维度落模式）；标题/HUD/结算照 [references/ui-kit.md](references/ui-kit.md)《HUD/UI 生成策略》五段（推导四属性 → 结构规范 → 底材 prompt → 集成 → 同框验收）。
+2. **完成 GDD 设计决策**：已有类型以类型包为玩法基线，新类型按 [references/new-type.md](references/new-type.md) 的八模块通用策略推演；两者都必须产出核心玩法、数值红线、关卡/进度、角色职责、素材系统、Sprite 状态、HUD/UI 信息设计、架构与验收，并通过玩法—视觉一致性检查。模块是决策覆盖面，不是固定模板；不适用项写明理由即可。
+3. **按 GDD 生产素材与 UI 底材**：把视觉简报、素材清单和 Sprite 状态计划交给 [references/assets.md](references/assets.md)，完成抠图、取色、逐项生图或程序化绘制、清理、切帧与 contact sheet；把 HUD 信息架构和 UI 四属性交给 [references/ui-kit.md](references/ui-kit.md)，生成所需底材与主题 icon。不得生产清单外素材，也不得用生产阶段的新想法静默改写设计。
+4. **单文件实现与 UI 集成**：照 [references/game-patterns.md](references/game-patterns.md) 写玩法结构，按 [references/controls.md](references/controls.md) 接入语义输入；使用已经生产的素材和 UI 底材，按 ui-kit.md 完成文字/数值叠加、组件状态、九宫格、回退与同框验收。
 5. **机器人通关验证（硬门槛）**：`node scripts/bot_harness.js <index.html>`，失败先改关卡不改机器人。
 6. **截图验收**：`scripts/make_ff_pages.py` 生成快进页 + 无头 Chromium 截图，至少验收标题/中段/终点/竖屏/横屏窗口（确认居中留边）5 张。
 7. **交付**：按通用原则第 5 条。
@@ -56,7 +57,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 - **3D 跑酷**（神庙逃亡/地铁跑酷式）：[references/runner-3d.md](references/runner-3d.md)（设计基线 + 程序化建模 + 程序化角色 IP 复刻），机器人 `scripts/runner_bot.js`，引擎 three.js r147 本地打包。
 - **消消乐**（经典 match-3）：[references/match3.md](references/match3.md)（设计基线 + 红线 + 实现模式），机器人 `scripts/bot_match3.js`。输入维度 = 点选拖拽 → controls.md 模式 C。
 - **竖版弹跳**（doodle jump 式）：[references/doodle-jump.md](references/doodle-jump.md)（设计基线 + 7 条红线 + 实现模式），机器人 `scripts/bot_doodle.js`（固定种子）。输入维度 = 单轴连续量 → controls.md 模式 B。
-- 新增游戏类型：先按 [references/new-type.md](references/new-type.md) 的五步推演产出设计说明（核心循环 → 机制基线 → 可行性红线 → 关卡/进度 → 架构与验收定义），实战验证 + 用户验收后，在 `references/` 下固化一个同结构类型包（设计基线 + 实现模式 + 配套机器人脚本），SKILL.md 通用流程不变。每个包必须实战验证过才可写入。
+- 新增游戏类型：按 [references/new-type.md](references/new-type.md) 的八模块通用策略完成设计决策（核心玩法 → 机制与红线 → 内容进度 → 角色/主题 → 素材系统 → Sprite → HUD/UI → 架构与验收），再生产素材和实现。实战验证 + 用户验收后，在 `references/` 下固化类型包（设计基线 + 视觉/素材基线 + 实现模式 + 配套机器人脚本）。每个包必须实战验证过才可写入。
 
 两个已验证类型另有**完整可运行的参考实现**（汪汪主题，可直接换皮）：`templates/platformer-2d/`、`templates/runner-3d/`。模板体积大**不随 .skill 包分发**，与本 skill 同仓库获取。**若 skill 旁没有 templates/ 目录**（单独安装的包），说明无模板可用——直接走工作流一，类型包已含全部构建基线，不依赖模板。
 
