@@ -34,7 +34,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 4. **通过设计门**：逐项检查玩法—角色—素材—Sprite—HUD—验证闭环；GDD 模块 6 必须先产出动画决策表，再把通过必要性门的动作写入 Sprite Contract 和生产白名单。已入选的机制动作不得标成静态变换；未闭合就回到对应模块，禁止进入生产。
 5. **生产素材和 UI**：按 assets.md、ui-kit.md 的生产执行区生成素材、UI 底材、回退和验收证据。角色动作只消费生产白名单；新角色/新类型先产出**游戏内 Seed Frame + 白名单动作节拍预览**，给用户看一次并等待批准；未批准禁止批量生产。批准后整条生成、统一归一化、预览并入引擎验收，生产阶段不得自行补齐动作。每件素材在 `ASSET_LEDGER.md` 记录职责、文件、生产方式、prompt/配方、批准证据、日期和状态。
 6. **按类型实现**：用类型注册表选择实现参考；新类型由项目 GDD 模块 8 定义数据结构、状态机和测试接口。输入统一走 [references/controls.md](references/controls.md)。
-7. **类型化验证**：按 [references/verification.md](references/verification.md) 调用注册机器人和截图方案；新类型必须建立适配机器人或确定性规则测试，失败先改游戏或设计，不降低验收口径。
+7. **类型化验证**：按 [references/verification.md](references/verification.md) 调用注册机器人和截图方案；简单单循环 H5 默认走其中的**快速验证档**，新类型必须建立适配机器人或确定性规则测试。所有项目机器人通过 `scripts/run_bot_guard.js` 加进程级超时；失败先改游戏或设计，不降低验收口径。
 8. **交付**：交付 `index.html`、素材、`GDD.md`、`ASSET_LEDGER.md` 和验证证据，按通用原则第 5 条留快照与备份。
 
 ## 工作流二：1-N 迭代（修 bug / 调手感 / 换素材）

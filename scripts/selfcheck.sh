@@ -162,6 +162,25 @@ done <<< "$B_RES"
 B_COUNT=$(printf '%s\n' "$B_RES" | grep -c "__")
 [ "$B_COUNT" -ge 11 ] || bad "工具冒烟段异常中断（仅 $B_COUNT/11 项有结果，python 可能有未捕获异常）"
 
+if node scripts/run_bot_guard.js --timeout-ms 1000 -- node -e 'process.exit(0)' >/dev/null 2>&1; then
+  ok "run_bot_guard 保留成功退出码"
+else
+  bad "run_bot_guard 成功命令异常"
+fi
+GUARD_OUT=$(node scripts/run_bot_guard.js --timeout-ms 250 -- node -e 'setInterval(()=>{},1000)' 2>&1)
+GUARD_RC=$?
+if [ "$GUARD_RC" = 124 ] && printf '%s' "$GUARD_OUT" | grep -q "BOT_TIMEOUT"; then
+  ok "run_bot_guard 250ms 截断死循环"
+else
+  bad "run_bot_guard 未快速截断（rc=$GUARD_RC）"
+fi
+
+if node scripts/cdp_shot.js --self-test 2>&1 | grep -q "PASS"; then
+  ok "cdp_shot 严格布尔就绪判定"
+else
+  bad "cdp_shot 严格就绪自检失败"
+fi
+
 echo "== C. 文档断链检查 =="
 C_RES=$(python3 - <<'PYEOF'
 import re
@@ -224,9 +243,11 @@ required = {
                                     "audit_sprite_frames.py"],
     Path("references/ui-kit.md"): ["阶段 A：GDD 设计参考", "阶段 B：UI 生产、集成与验收"],
     Path("references/verification.md"): ["动作时间线证据", "audit_sprite_frames.py", "物理事件帧",
-                                         "生产白名单", "冗余动作检查"],
+                                         "生产白名单", "冗余动作检查", "机器人时间与防卡死合同",
+                                         "固定 `dt`", "scripts/run_bot_guard.js", "布尔值 `true`", "真正截图前", "简单 H5 快速验证档"],
     Path("SKILL.md"): ["## 类型注册表", "scripts/bot_platformer.js", "scripts/bot_match3.js", "scripts/bot_doodle.js", "scripts/runner_bot.js",
-                       "动画最小充分集", "动画决策表", "生产白名单", "白名单动作节拍预览"],
+                       "动画最小充分集", "动画决策表", "生产白名单", "白名单动作节拍预览",
+                       "简单单循环 H5", "scripts/run_bot_guard.js"],
 }
 for p, tokens in required.items():
     for token in tokens:
