@@ -27,6 +27,7 @@ bash scripts/selfcheck.sh
 
 - `GDD.md`：覆盖通用八模块，写明类型包继承项、项目调整项、来源和不适用理由；
 - `ASSET_LEDGER.md`：每件素材的职责、文件、生产方式、prompt/配方、日期、版本和验收状态；
+- 参考角色硬门适用时存在 `CHARACTER_PRODUCTION.json`，并在交给用户看 Seed 前运行 `python3 scripts/audit_character_production.py --project <项目目录> --phase seed`；
 - `index.html` 和 GDD 素材清单中声明的文件。
 
 逐项核对玩法—角色—素材—Sprite—HUD—验证闭环。对任何承担动画职责的角色检查：
@@ -41,6 +42,7 @@ bash scripts/selfcheck.sh
 - GDD 模块 6 存在 Sprite Contract，生产白名单内的 M 动作不是“静态图 + 平移/缩放/染色”；
 - 新角色/新类型的 `ASSET_LEDGER.md` 有 Seed Frame、游戏构图预览和用户批准证据；
 - 生产白名单中每条需要真实帧的动作都有归一化帧、`sprite-meta.json`、preview 和 root/socket 定义；
+- 参考角色硬门适用时，正式角色入引擎前 `scripts/audit_character_production.py --phase production` PASS；Canvas 角色、缺 reference、待审批或缺 Sprite 证据都会判失败；
 
 再做一次**冗余动作检查**：若移除某动作后，玩家的输入、时机判断、空间判断和状态理解均不受影响，则该动作不得进入生产白名单。非终局动作还必须证明不会为表现而延迟恢复输入。
 

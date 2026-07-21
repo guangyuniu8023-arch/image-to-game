@@ -19,9 +19,10 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 5. 每轮结束三件事：**交付 → 快照 → 备份**。意图固定，路径与工具随环境替换（见"环境适配"一节）：交付 = 成果放进**持久且用户可访问**的目录（每个项目独立子目录，`index.html` 在根）；快照 = 环境有版本工具就调用；备份 = 源码复制到持久工作区，不能只留在临时目录。
 6. **所有游戏竖屏锁定**：游戏区永远是手机竖屏比例，横屏窗口时居中显示 9:16 舞台、两侧留边，不做横屏布局（实现见各类型包）。
 7. **Sprite 遵循动画最小充分集**：玩家动词、角色职责和事件只产生候选，不是默认状态清单。候选动作必须通过归属、信息增量、姿态必要性和节奏收益四道门，才能进入 Sprite Contract 与生产白名单；不确定时默认不生产新动作。已入选的机制动作禁止用原立绘平移、缩放或染色冒充；次级反馈优先复用现有姿态、UI 或程序化表现。设计与生产见 [references/gdd-strategy.md](references/gdd-strategy.md) 与 [references/assets.md](references/assets.md)。
-8. **必须有资源加载门**：素材全部 `complete` 前不开局（显示加载进度），加载失败也照常放行（走各自的代码回退），绝不白屏也绝不占位圈开局；**字体也在门内**（`document.fonts.load` 完成后放行，失败兜底不卡门），否则首帧会按过渡字体定格错位。UI 的 AI、代码或混合生产方式由 GDD 决定，文字、数字和动态状态始终由代码绘制，详见 [references/ui-kit.md](references/ui-kit.md)。
-9. **项目 GDD 决定“做什么、为什么”，reference 决定“怎样推导、怎样执行”**：所有 0-1 项目都按 [references/gdd-strategy.md](references/gdd-strategy.md) 生成并保存 `<项目目录>/GDD.md`；模块是覆盖要求，不是固定模板。素材生产记录写入 `<项目目录>/ASSET_LEDGER.md`，不塞进类型包。
-10. **设计和生产分门调用**：[references/assets.md](references/assets.md) 与 [references/ui-kit.md](references/ui-kit.md) 的“设计参考区”可在 GDD 阶段读取；只有 GDD 通过一致性门后，才能进入各自的“生产执行区”。禁止先批量生产再反推玩法和界面。
+8. **参考角色生图是硬门，不是自由选项**：用户提供可识别角色图且角色承担 A 操作主体或 B 主体驱动者时，正式主角必须用当前环境的图片生成/编辑工具，且必须把上传图作为 reference。Canvas 只可做碰撞/调试/加载失败回退和非角色几何，不能冒充正式主角；只有用户明确要求“纯代码/不调用 AI”才能例外并留证。生图工具失败时按工具建议重试，仍失败就报告阻塞，禁止静默降级。生产前后分别运行 `scripts/audit_character_production.py` 的 Seed/production 门。
+9. **必须有资源加载门**：素材全部 `complete` 前不开局（显示加载进度），加载失败也照常放行（走各自的代码回退），绝不白屏也绝不占位圈开局；**字体也在门内**（`document.fonts.load` 完成后放行，失败兜底不卡门），否则首帧会按过渡字体定格错位。UI 的 AI、代码或混合生产方式由 GDD 决定，文字、数字和动态状态始终由代码绘制，详见 [references/ui-kit.md](references/ui-kit.md)。
+10. **项目 GDD 决定“做什么、为什么”，reference 决定“怎样推导、怎样执行”**：所有 0-1 项目都按 [references/gdd-strategy.md](references/gdd-strategy.md) 生成并保存 `<项目目录>/GDD.md`；模块是覆盖要求，不是固定模板。素材生产记录写入 `<项目目录>/ASSET_LEDGER.md`，不塞进类型包。
+11. **设计和生产分门调用**：[references/assets.md](references/assets.md) 与 [references/ui-kit.md](references/ui-kit.md) 的“设计参考区”可在 GDD 阶段读取；只有 GDD 通过一致性门后，才能进入各自的“生产执行区”。禁止先批量生产再反推玩法和界面。
 
 ## 工作流一：0-1 创建（八步）
 
@@ -32,7 +33,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 2. **选择设计依据**：已有类型读取 [references/gdd-strategy.md](references/gdd-strategy.md) + 对应类型包；没有类型包时再读取 [references/new-type.md](references/new-type.md) 做基线考据和红线推演。
 3. **保存项目 GDD**：在项目根写 `GDD.md`，覆盖八模块决策及来源；可以合并、重排，不适用项写明理由。不得把 reference 文件复制成项目 GDD。
 4. **通过设计门**：逐项检查玩法—角色—素材—Sprite—HUD—验证闭环；GDD 模块 6 必须先产出动画决策表，再把通过必要性门的动作写入 Sprite Contract 和生产白名单。已入选的机制动作不得标成静态变换；未闭合就回到对应模块，禁止进入生产。
-5. **生产素材和 UI**：按 assets.md、ui-kit.md 的生产执行区生成素材、UI 底材、回退和验收证据。角色动作只消费生产白名单；新角色/新类型先产出**游戏内 Seed Frame + 白名单动作节拍预览**，给用户看一次并等待批准；未批准禁止批量生产。批准后整条生成、统一归一化、预览并入引擎验收，生产阶段不得自行补齐动作。每件素材在 `ASSET_LEDGER.md` 记录职责、文件、生产方式、prompt/配方、批准证据、日期和状态。
+5. **生产素材和 UI（两段式硬停）**：按 assets.md、ui-kit.md 的生产执行区生成素材、UI 底材、回退和验收证据。参考角色硬门适用时，先用上传图作为 reference 调用图片生成/编辑工具，产出**游戏内 Seed Frame + 游戏构图预览 + 白名单动作节拍预览**，写 `CHARACTER_PRODUCTION.json`，运行 `python3 scripts/audit_character_production.py --project <项目目录> --phase seed`。PASS 后把预览交给用户并**结束当前执行，等待明确批准**；未批准禁止生成整条、实现正式角色或宣称游戏完成。批准后只对生产白名单整条生成、统一归一化和预览，入引擎前再运行 `--phase production`。生产阶段不得自行补齐动作。每件素材在 `ASSET_LEDGER.md` 记录职责、文件、生产方式、prompt/配方、批准证据、日期和状态。
 6. **按类型实现**：用类型注册表选择实现参考；新类型由项目 GDD 模块 8 定义数据结构、状态机和测试接口。输入统一走 [references/controls.md](references/controls.md)。
 7. **类型化验证**：按 [references/verification.md](references/verification.md) 调用注册机器人和截图方案；简单单循环 H5 默认走其中的**快速验证档**，新类型必须建立适配机器人或确定性规则测试。所有项目机器人通过 `scripts/run_bot_guard.js` 加进程级超时；失败先改游戏或设计，不降低验收口径。
 8. **交付**：交付 `index.html`、素材、`GDD.md`、`ASSET_LEDGER.md` 和验证证据，按通用原则第 5 条留快照与备份。
@@ -47,7 +48,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 
 1. **复制模板**：`templates/<类型>/` 复制为新项目目录。
 2. **生成差异 GDD**：保存项目 `GDD.md`，明确继承的玩法/物理/关卡/验证，以及重新推导的角色职责、主题、素材、Sprite 和 HUD 皮肤。换皮不重写不变的基线。
-3. **换主题素材**（只换文件，不动玩法代码）：按所选模板的素材接口、对应类型包和项目 GDD 生产白名单逐项生产；不得仅按“2D / 3D”套用统一动作或素材清单。若模板必需动作未进入当前项目白名单，判定模板不匹配并改走工作流一，不得为凑模板接口新增动作。文件名与模板保持一致，并写 `ASSET_LEDGER.md`。主角身份或姿态体系变更时同样走 Seed Frame 批准；只替换已批准同身份的色变体可不停顿。
+3. **换主题素材**（只换文件，不动玩法代码）：按所选模板的素材接口、对应类型包和项目 GDD 生产白名单逐项生产；不得仅按“2D / 3D”套用统一动作或素材清单。若模板必需动作未进入当前项目白名单，判定模板不匹配并改走工作流一，不得为凑模板接口新增动作。文件名与模板保持一致，并写 `ASSET_LEDGER.md`。参考图主角身份或姿态体系变更时同样应用参考角色生图硬门、`CHARACTER_PRODUCTION.json` 和 Seed Frame 批准；只替换已批准同身份的色变体可不停顿。
    - `platformer-2d` 模板：保留现有主角与跑步帧 ×4（A→B→C→A）、收集物、敌人、终点、障碍、背景和地形砖接口。
    - `runner-3d` 模板：保留标题图、收集物和天空图接口；程序化角色只改对应类型包允许的配色/特征参数。
    - 新增模板：先在对应类型包写清模板素材接口、可继承动作和替换边界，再接入本工作流；契约未完成时走工作流一。

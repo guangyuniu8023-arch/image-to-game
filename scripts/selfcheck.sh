@@ -157,6 +157,56 @@ r = subprocess.run([
 ], capture_output=True)
 res.append(("audit_sprite_frames 帧硬门", r.returncode == 0))
 
+# Reference-character gate: a Canvas formal hero must fail; approved generated artifacts pass.
+gate = tmp / "character-gate"
+(gate / "input").mkdir(parents=True)
+(gate / "assets").mkdir()
+(gate / "evidence").mkdir()
+(gate / "sprites/jump/frames").mkdir(parents=True)
+for rel in ["input/character.png", "assets/seed.png", "evidence/composition.png",
+            "evidence/action-beats.png", "assets/jump-strip.png",
+            "sprites/jump/meta.json", "sprites/jump/preview.png",
+            "sprites/jump/frames/01.png"]:
+    (gate / rel).write_bytes(b"fixture")
+manifest = {
+    "version": 1, "reference_character": True, "role": "A",
+    "user_requested_code_only": False,
+    "formal_visual_method": "reference-image-generation",
+    "reference_images": ["input/character.png"],
+    "generator": {"tool": "image_generation_tool.py", "reference_used": True},
+    "seed": {
+        "frame": "assets/seed.png", "composition_preview": "evidence/composition.png",
+        "action_beat_preview": "evidence/action-beats.png",
+        "approval": {"status": "pending", "evidence": ""}
+    },
+    "actions": []
+}
+mp = gate / "CHARACTER_PRODUCTION.json"
+mp.write_text(json.dumps(manifest), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_character_production.py", "--project", str(gate),
+                    "--phase", "seed"], capture_output=True)
+res.append(("character gate Seed产物→PASS", r.returncode == 0))
+manifest["formal_visual_method"] = "canvas"
+mp.write_text(json.dumps(manifest), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_character_production.py", "--project", str(gate),
+                    "--phase", "seed"], capture_output=True)
+res.append(("character gate Canvas正式主角→FAIL", r.returncode != 0))
+manifest["formal_visual_method"] = "reference-image-generation"
+mp.write_text(json.dumps(manifest), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_character_production.py", "--project", str(gate),
+                    "--phase", "production"], capture_output=True)
+res.append(("character gate 未审批量产→FAIL", r.returncode != 0))
+manifest["seed"]["approval"] = {"status": "approved", "evidence": "user message test-fixture"}
+manifest["actions"] = [{
+    "name": "jump", "strip": "assets/jump-strip.png",
+    "frames_dir": "sprites/jump/frames", "meta": "sprites/jump/meta.json",
+    "preview": "sprites/jump/preview.png"
+}]
+mp.write_text(json.dumps(manifest), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_character_production.py", "--project", str(gate),
+                    "--phase", "production"], capture_output=True)
+res.append(("character gate 已审批白名单量产→PASS", r.returncode == 0))
+
 for n, p in res:
     print(("OK__" if p else "BAD__") + n)
 PYEOF
@@ -165,7 +215,7 @@ while IFS= read -r line; do
   case "$line" in OK__*) ok "${line#OK__}";; BAD__*) bad "${line#BAD__}";; esac
 done <<< "$B_RES"
 B_COUNT=$(printf '%s\n' "$B_RES" | grep -c "__")
-[ "$B_COUNT" -ge 11 ] || bad "工具冒烟段异常中断（仅 $B_COUNT/11 项有结果，python 可能有未捕获异常）"
+[ "$B_COUNT" -ge 15 ] || bad "工具冒烟段异常中断（仅 $B_COUNT/15 项有结果，python 可能有未捕获异常）"
 
 if node scripts/run_bot_guard.js --timeout-ms 1000 -- node -e 'process.exit(0)' >/dev/null 2>&1; then
   ok "run_bot_guard 保留成功退出码"
@@ -248,15 +298,18 @@ required = {
     Path("references/assets.md"): ["阶段 A：GDD 设计参考", "阶段 B：素材生产与验收",
                                     "动画决策表", "生产白名单", "四道必要性门", "Seed Frame 批准门", "build_sprite_edit_canvas.py",
                                     "normalize_sprite_strip.py", "render_sprite_preview_sheet.py",
-                                    "audit_sprite_frames.py"],
+                                    "audit_sprite_frames.py", "参考角色生图硬门", "CHARACTER_PRODUCTION.json",
+                                    "scripts/audit_character_production.py"],
     Path("references/ui-kit.md"): ["阶段 A：GDD 设计参考", "阶段 B：UI 生产、集成与验收"],
     Path("references/verification.md"): ["动作时间线证据", "audit_sprite_frames.py", "物理事件帧",
                                          "生产白名单", "冗余动作检查", "机器人时间与防卡死合同",
-                                         "固定 `dt`", "scripts/run_bot_guard.js", "布尔值 `true`", "真正截图前", "简单 H5 快速验证档"],
+                                         "固定 `dt`", "scripts/run_bot_guard.js", "布尔值 `true`", "真正截图前", "简单 H5 快速验证档",
+                                         "CHARACTER_PRODUCTION.json", "scripts/audit_character_production.py"],
     Path("SKILL.md"): ["## 类型注册表", "scripts/bot_platformer.js", "scripts/bot_match3.js", "scripts/bot_doodle.js", "scripts/runner_bot.js",
                        "动画最小充分集", "动画决策表", "生产白名单", "白名单动作节拍预览",
                        "简单单循环 H5", "scripts/run_bot_guard.js", "所选模板的素材接口",
-                       "不得仅按“2D / 3D”", "不得为凑模板接口新增动作", "新增模板"],
+                       "不得仅按“2D / 3D”", "不得为凑模板接口新增动作", "新增模板",
+                       "参考角色生图是硬门", "CHARACTER_PRODUCTION.json", "scripts/audit_character_production.py"],
 }
 for p, tokens in required.items():
     for token in tokens:
