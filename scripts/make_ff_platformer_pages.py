@@ -2,12 +2,12 @@
 """生成"同步快进"测试页：页面加载即自动开局并同步快进 N 秒游戏逻辑，
 使无头浏览器截图不依赖等待时序——截图即第 N 秒的游戏画面。
 
-用法: python3 make_ff_pages.py <index.html> <输出目录> <秒数列表，逗号分隔>
-示例: python3 make_ff_pages.py index.html /tmp/fftest 6,22,29
+用法: python3 make_ff_platformer_pages.py <index.html> <输出目录> <秒数列表，逗号分隔>
+示例: python3 make_ff_platformer_pages.py index.html /tmp/fftest 6,22,29
 之后: 在输出目录起 http 服务，用 chromium --headless=new --screenshot 截图。
 
 原理: 在 </body> 前注入一段脚本，同步循环调用游戏的 update(1/60)，
-      页面首帧渲染时游戏已经进行到第 N 秒。机器人操作与 bot_harness.js 相同。
+      页面首帧渲染时游戏已经进行到第 N 秒。操作逻辑与 bot_platformer.js 相同。
 """
 import os
 import shutil

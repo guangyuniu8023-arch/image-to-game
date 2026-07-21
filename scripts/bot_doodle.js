@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Doodle Jump 机器人通关测试（参照 skill bot_harness.js 的 DOM-shim 思路，
- * 玩法与胜负判定按本类型 GDD 第 5 步验收定义，不照抄平台跳跃判定）。
+ * Doodle Jump 机器人通关测试（用 DOM/canvas 桩执行游戏逻辑，
+ * 玩法与胜负判定按 doodle-jump.md 和项目 GDD 模块 8 定义）。
  *
  * 用法: node bot_doodle.js <index.html> [最长模拟秒数=240]
  * 退出码: 0 = 通关（WIN: true）；1 = 未通关 / 出错

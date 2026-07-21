@@ -2,7 +2,7 @@
 /**
  * 无头机器人通关测试：验证平台跳跃游戏的关卡"确实可通关"。
  *
- * 用法: node bot_harness.js <index.html> [最长模拟秒数=180] [--lenient]
+ * 用法: node bot_platformer.js <index.html> [最长模拟秒数=180] [--lenient]
  * 退出码: 0 = 通关且完整性断言通过；1 = 未通关 / 断言失败 / 出错
  *         --lenient: 完整性断言降级为警告(仅用于 GDD 已声明简化的实验项目)
  *
@@ -11,7 +11,7 @@
  *       自动跳跃，模拟真实玩家跑完整关。
  *
  * 约定: 游戏代码需包含 player/enemies/keys/press/G/update/newGame/tileAt/
- *       solid/TILE/ROWS 这些符号（按 references/game-patterns.md 写的游戏
+ *       solid/TILE/ROWS 这些符号（按 references/platformer-patterns.md 写的游戏
  *       天然满足）。缺失时会明确报出缺哪个。
  */
 "use strict";
@@ -23,7 +23,7 @@ const htmlPath = process.argv[2];
 const MAXSEC = Number(process.argv[3] || 180);
 const LENIENT = process.argv.includes("--lenient");
 if (!htmlPath) {
-  console.error("用法: node bot_harness.js <index.html> [最长秒数]");
+  console.error("用法: node bot_platformer.js <index.html> [最长秒数]");
   process.exit(1);
 }
 const html = fs.readFileSync(htmlPath, "utf8");
@@ -53,12 +53,12 @@ const BOT = `
   const need = ["player", "enemies", "keys", "press", "TILE", "ROWS", "solid", "tileAt", "update", "G", "newGame"];
   const missing = need.filter((n) => { try { eval(n); return false; } catch (e) { return true; } });
   if (missing.length) {
-    console.error("游戏代码缺少符号: " + missing.join(", ") + " —— 请按 references/game-patterns.md 的命名写，或改机器人适配");
+    console.error("游戏代码缺少符号: " + missing.join(", ") + " —— 请按 references/platformer-patterns.md 的命名写，或改机器人适配");
     process.exit(1);
   }
   newGame();
 
-  // ===== 关卡完整性断言(gdd.md 分段配方的强制校验)=====
+  // ===== 关卡完整性断言(platformer-2d.md 分段配方的强制校验)=====
   // 在 newGame() 后、游玩前扫描 grid 与实体表:长度/?砖/砖块群/水管/台阶/浮台/敌/收集物
   const LENIENT = ${LENIENT};
   function audit() {
@@ -66,7 +66,7 @@ const BOT = `
     let Tmap = null, cols = 0;
     try { Tmap = eval("T"); } catch (e) {}
     try { cols = eval("COLS"); } catch (e) {}
-    if (cols && cols < 200) issues.push("关卡长度 " + cols + " 列 < 规范 200(gdd.md 分段配方总长 200~220)");
+    if (cols && cols < 200) issues.push("关卡长度 " + cols + " 列 < 规范 200(platformer-2d.md 分段配方总长 200~220)");
     if (Tmap && cols) {
       const cnt = {};
       for (let c = 0; c < cols; c++) for (let r = 0; r < ROWS; r++) {
@@ -145,6 +145,6 @@ const BOT = `
 `;
 
 const combined = STUBS + "\n" + blocks.join("\n;\n") + "\n" + BOT;
-const tmp = path.join(os.tmpdir(), "bot_harness_" + process.pid + ".js");
+const tmp = path.join(os.tmpdir(), "bot_platformer_" + process.pid + ".js");
 fs.writeFileSync(tmp, combined);
 require(tmp);
