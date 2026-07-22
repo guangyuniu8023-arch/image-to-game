@@ -43,6 +43,10 @@ for proj in ../match3 ../match3-timed ../doodlejump; do
 done
 
 echo "== B. 工具冒烟（合成夹具，即造即测）=="
+python3 scripts/scaffold_gameplay_contract.py --self-test >/dev/null 2>&1 \
+  && ok "gameplay contract 脚手架" || bad "gameplay contract 脚手架失败"
+python3 scripts/audit_pipeline_stage.py --self-test >/dev/null 2>&1 \
+  && ok "pipeline stage Gate + 稳定失败签名" || bad "pipeline stage Gate 失败"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 B_RES=$(python3 - "$TMP" <<'PYEOF'
 import sys, subprocess, json, hashlib, shutil
@@ -294,6 +298,9 @@ manifest = {
 mp = gate / "CHARACTER_PRODUCTION.json"
 mp.write_text(json.dumps(manifest), encoding="utf-8")
 r = subprocess.run(["python3", f"{S}/audit_character_production.py", "--project", str(gate),
+                    "--phase", "draft"], capture_output=True)
+res.append(("character gate 生图前Draft→PASS", r.returncode == 0))
+r = subprocess.run(["python3", f"{S}/audit_character_production.py", "--project", str(gate),
                     "--phase", "seed"], capture_output=True)
 res.append(("character gate Seed产物→PASS", r.returncode == 0))
 ledger = gate / "evidence/.visual-audit-attempts.jsonl"
@@ -413,10 +420,10 @@ cp -R "$TMP/runtime-visual" "$TMP/runtime-retry"
 RETRY_OUT=$(node scripts/audit_visual_runtime.js --project "$TMP/runtime-retry" --phase seed \
   --out "$TMP/runtime-retry/evidence/retry-audit.json" 2>&1)
 RETRY_RC=$?
-if [ "$RETRY_RC" != 0 ] && printf '%s' "$RETRY_OUT" | grep -q "repair limit exceeded"; then
-  ok "audit_visual_runtime 第4次拒绝继续循环"
+if [ "$RETRY_RC" != 0 ] && printf '%s' "$RETRY_OUT" | grep -q "third-attempt report is terminal"; then
+  ok "audit_visual_runtime 第4次不预约且保留第3次详细报告"
 else
-  bad "audit_visual_runtime 重试次数门失败（rc=$RETRY_RC）"
+  bad "audit_visual_runtime 重试次数门失败（rc=${RETRY_RC}）"
 fi
 
 if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 \

@@ -13,7 +13,7 @@ const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
 function usage() {
-  console.error("用法: node scripts/audit_visual_runtime.js --project DIR --phase seed|production --out FILE [--baseline FILE]");
+  console.error("用法: node scripts/audit_visual_runtime.js --project DIR --phase design|seed|production --out FILE [--baseline FILE]");
 }
 
 function parseArgs(argv) {
@@ -529,7 +529,31 @@ function nextAttempt(prior, phase, ledgerAttempts = 0) {
   return Math.max(reportAttempts, ledgerAttempts) + 1;
 }
 
-function attemptLedgerLocation(project) {
+const PIPELINE_CONTROLLER_FILE = "/etc/pi/pipeline-controller.json";
+
+function readControllerIdentity(controllerPath = PIPELINE_CONTROLLER_FILE) {
+  if (!fs.existsSync(controllerPath)) return null;
+  let value;
+  try { value = JSON.parse(fs.readFileSync(controllerPath, "utf8")); }
+  catch (_) { throw new Error("pipeline controller identity is invalid JSON"); }
+  const taskId = value && value.task_id;
+  const stateDir = value && value.audit_state_dir;
+  if (!taskId || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,126}[A-Za-z0-9]$/.test(taskId)) {
+    throw new Error("pipeline controller identity has an invalid task_id");
+  }
+  if (typeof stateDir !== "string" || !path.isAbsolute(stateDir)) {
+    throw new Error("pipeline controller identity requires an absolute audit_state_dir");
+  }
+  return { taskId, stateDir };
+}
+
+function attemptLedgerLocation(project, controllerPath = PIPELINE_CONTROLLER_FILE) {
+  const controller = readControllerIdentity(controllerPath);
+  if (controller) {
+    const root = path.resolve(controller.stateDir);
+    const id = crypto.createHash("sha256").update(controller.taskId).update("\0").update(project).digest("hex");
+    return { path: path.join(root, `${id}.jsonl`), reference: `controller://${id}` };
+  }
   const stateDir = process.env.VISUAL_AUDIT_STATE_DIR;
   const runId = process.env.VISUAL_AUDIT_RUN_ID;
   if (stateDir || runId) {
@@ -544,8 +568,8 @@ function attemptLedgerLocation(project) {
   return { path: ledgerPath, reference: path.relative(project, ledgerPath) };
 }
 
-function reserveAttempt(project, phase, prior, contractSha) {
-  const location = attemptLedgerLocation(project);
+function reserveAttempt(project, phase, prior, contractSha, controllerPath = PIPELINE_CONTROLLER_FILE) {
+  const location = attemptLedgerLocation(project, controllerPath);
   const ledgerPath = location.path;
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   let ledgerAttempts = 0;
@@ -561,7 +585,17 @@ function reserveAttempt(project, phase, prior, contractSha) {
       }
     }
   }
-  const attempt = nextAttempt(prior, phase, ledgerAttempts);
+  const completedAttempts = Math.max(
+    ledgerAttempts,
+    prior && prior.phase === phase && Number.isInteger(prior.attempt) ? prior.attempt : 0,
+  );
+  if (completedAttempts >= 3) {
+    throw new Error(
+      "visual audit repair limit reached: the detailed third-attempt report is terminal; " +
+      "do not reserve another attempt",
+    );
+  }
+  const attempt = completedAttempts + 1;
   fs.appendFileSync(ledgerPath, `${JSON.stringify({
     version: 1, phase, attempt, contract_sha256: contractSha,
     reserved_at: new Date().toISOString(),
@@ -598,6 +632,9 @@ function selfTest() {
   const tiny = validateCase(contract, caseDef, { samples: [sample(100, 30)] });
   const drift = validateCase(contract, caseDef, { samples: [sample(100), sample(110)] });
   const fallback = validateCase(contract, caseDef, { samples: [sample(100, 100, "fallback")] });
+  const fallbackDesign = validateCase(
+    contract, caseDef, { samples: [sample(100, 100, "fallback")] }, "design",
+  );
   const transitionCase = {
     name: "retarget", entry: "scripted", state: "settled", before_state: "ready",
     behavior: "transition", trigger_event: "landed", required_visible: ["player", "target"],
@@ -616,33 +653,49 @@ function selfTest() {
     events: ["landed"], before: transitionSample(0, 0, 0, 0, "ready"),
     samples: [transitionSample(0, 0, 0, 0), transitionSample(0, 0, 0, 0)],
   });
+  const preTriggerLeak = validateCase(contract, transitionCase, {
+    events: ["landed"], before: transitionSample(0, 0, 0, 0, "ready"),
+    samples: [transitionSample(0, 0, 0, 0, "ready"), transitionSample(20, 20, 20, 20)],
+  });
   const wrongViewportSample = sample();
   wrongViewportSample.viewport = { width: 390, height: 700 };
   const wrongViewport = validateCase(contract, caseDef, { samples: [wrongViewportSample] });
   const baseline = { metrics: { charge: pass.metrics } };
   const mismatch = compareBaseline(contract, { charge: { primary_area_ratio: pass.metrics.primary_area_ratio * 0.5, required_group_area_ratio: pass.metrics.required_group_area_ratio } }, baseline);
-  const retryGuard = nextAttempt({ phase: "seed", attempt: 3 }, "seed", 0) === 4;
   const ledgerProject = fs.mkdtempSync(path.join(require("os").tmpdir(), "visual-audit-ledger-"));
-  const ledgerFirst = reserveAttempt(ledgerProject, "seed", null, "abc").attempt;
-  const ledgerSecond = reserveAttempt(ledgerProject, "seed", null, "changed-contract").attempt;
+  const controllerPath = path.join(ledgerProject, "controller.json");
+  const stateDir = path.join(ledgerProject, "state");
+  fs.writeFileSync(controllerPath, JSON.stringify({ task_id: "self-test-task", audit_state_dir: stateDir }));
+  const ledgerFirst = reserveAttempt(ledgerProject, "seed", null, "abc", controllerPath).attempt;
+  const ledgerSecond = reserveAttempt(ledgerProject, "seed", null, "changed-contract", controllerPath).attempt;
+  const ledgerThird = reserveAttempt(ledgerProject, "seed", null, "changed-contract", controllerPath).attempt;
+  let fourthRejected = false;
+  try { reserveAttempt(ledgerProject, "seed", null, "changed-contract", controllerPath); }
+  catch (error) { fourthRejected = error.message.includes("third-attempt report is terminal"); }
+  process.env.VISUAL_AUDIT_RUN_ID = "model-attempted-override";
+  const controllerLocation = attemptLedgerLocation(ledgerProject, controllerPath);
+  const controllerStable = controllerLocation.reference.includes("controller://");
   const exceptionDetail = pageExceptionMessage({ exceptionDetails: {
     text: "Uncaught", url: "http://example.test/index.html", lineNumber: 4, columnNumber: 2,
     exception: { description: "TypeError: broken ready assignment\n at boot" },
   } });
-  if (!pass.problems.length && !transition.problems.length &&
+  if (!pass.problems.length && !fallbackDesign.problems.length && !transition.problems.length &&
       tiny.problems.some((p) => p.includes("visible height")) &&
       drift.problems.some((p) => p.includes("drifted")) &&
       fallback.problems.some((p) => p.includes("render_source")) &&
       fakeTransition.problems.some((p) => p.includes("retarget delta")) &&
+      preTriggerLeak.problems.some((p) => p.includes("retarget delta")) &&
       wrongViewport.problems.some((p) => p.includes("must match contract")) &&
-      mismatch.length && retryGuard && ledgerFirst === 1 && ledgerSecond === 2 &&
+      mismatch.length && ledgerFirst === 1 && ledgerSecond === 2 && ledgerThird === 3 &&
+      fourthRejected && controllerStable &&
       exceptionDetail.includes("TypeError: broken ready assignment") && exceptionDetail.includes(":5:3")) {
     console.log("VISUAL_RUNTIME_SELFTEST: PASS");
     return 0;
   }
   console.error("VISUAL_RUNTIME_SELFTEST: FAIL", {
-    pass, tiny, drift, fallback, transition, fakeTransition, wrongViewport, mismatch,
-    ledgerFirst, ledgerSecond, exceptionDetail,
+    pass, tiny, drift, fallback, fallbackDesign, transition, fakeTransition, preTriggerLeak,
+    wrongViewport, mismatch,
+    ledgerFirst, ledgerSecond, ledgerThird, fourthRejected, controllerStable, exceptionDetail,
   });
   return 1;
 }
@@ -651,7 +704,14 @@ async function main() {
   let args;
   try { args = parseArgs(process.argv); } catch (error) { console.error(error.message); usage(); return 2; }
   if (args.selfTest) return selfTest();
-  if (!args.project || !args.phase || !args.out || !["seed", "production"].includes(args.phase)) {
+  if (fs.existsSync(PIPELINE_CONTROLLER_FILE)) {
+    console.error(
+      "VISUAL_RUNTIME_AUDIT: DEFERRED_TO_CONTROLLER controller-backed Pi workers cannot " +
+      "reserve visual-audit attempts; run this gate from the external controller after the worker exits",
+    );
+    return 3;
+  }
+  if (!args.project || !args.phase || !args.out || !["design", "seed", "production"].includes(args.phase)) {
     usage(); return 2;
   }
   const project = path.resolve(args.project);
@@ -683,9 +743,6 @@ async function main() {
   let chrome = null;
   let client = null;
   try {
-    if (attempt > 3) {
-      throw new Error("visual audit repair limit exceeded: initial run + two automatic repair runs already used; stop and report evidence");
-    }
     const staticAudit = spawnSync("python3", [path.join(__dirname, "audit_visual_contract.py"), "--project", project], { encoding: "utf8" });
     if (staticAudit.status !== 0) throw new Error(`visual contract audit failed: ${(staticAudit.stdout || staticAudit.stderr).trim()}`);
     const contract = JSON.parse(fs.readFileSync(contractPath, "utf8"));

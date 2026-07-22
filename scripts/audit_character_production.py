@@ -21,6 +21,7 @@ from typing import Any
 MANIFEST = "CHARACTER_PRODUCTION.json"
 FORMAL_METHOD = "reference-image-generation"
 FORMAL_ROLES = {"A", "B"}
+PIPELINE_CONTROLLER_FILE = Path("/etc/pi/pipeline-controller.json")
 
 
 def fail(message: str) -> None:
@@ -66,6 +67,17 @@ def require_artifact(project: Path, value: Any, label: str, problems: list[str])
         problems.append(f"{label} artifact is empty: {value}")
 
 
+def require_project_path(value: Any, label: str, problems: list[str]) -> str:
+    if not isinstance(value, str) or not value.strip():
+        problems.append(f"{label} must name a project-relative path")
+        return ""
+    rel = Path(value)
+    if rel.is_absolute() or ".." in rel.parts:
+        problems.append(f"{label} must stay inside the project: {value}")
+        return ""
+    return value.strip()
+
+
 def artifact_path(project: Path, value: Any, label: str, problems: list[str]) -> Path | None:
     before = len(problems)
     require_artifact(project, value, label, problems)
@@ -99,8 +111,13 @@ def audit_attempt_ledger(
     ledger_value = report.get("attempt_ledger")
     ledger_path: Path | None
     if isinstance(ledger_value, str) and ledger_value.startswith("controller://"):
-        state_dir = os.environ.get("VISUAL_AUDIT_STATE_DIR")
-        run_id = os.environ.get("VISUAL_AUDIT_RUN_ID")
+        controller: dict[str, Any] | None = None
+        if PIPELINE_CONTROLLER_FILE.is_file():
+            controller = load_json_artifact(
+                PIPELINE_CONTROLLER_FILE, "pipeline controller identity", problems
+            )
+        state_dir = controller.get("audit_state_dir") if controller else os.environ.get("VISUAL_AUDIT_STATE_DIR")
+        run_id = controller.get("task_id") if controller else os.environ.get("VISUAL_AUDIT_RUN_ID")
         ledger_id = ledger_value.removeprefix("controller://")
         if not state_dir or not run_id:
             problems.append("controller attempt ledger requires controller audit-state environment")
@@ -276,6 +293,29 @@ def audit(project: Path, phase: str) -> list[str]:
     if not isinstance(seed, dict):
         problems.append("seed must be an object")
         return problems
+    if phase == "draft":
+        require_project_path(seed.get("frame"), "seed.frame", problems)
+        require_project_path(seed.get("composition_preview"), "seed.composition_preview", problems)
+        require_project_path(seed.get("action_beat_preview"), "seed.action_beat_preview", problems)
+        if seed.get("action_beat_preview_method") != "diagram-from-seed":
+            problems.append("seed.action_beat_preview_method must equal diagram-from-seed")
+        approval = seed.get("approval")
+        if not isinstance(approval, dict) or approval.get("status") != "pending":
+            problems.append("draft phase requires seed.approval.status=pending")
+        actions = data.get("actions")
+        if not isinstance(actions, list) or actions:
+            problems.append("draft phase requires actions=[]")
+        planned = data.get("planned_actions")
+        if not isinstance(planned, list):
+            problems.append("planned_actions must be an array")
+        visual = data.get("visual")
+        if not isinstance(visual, dict):
+            problems.append("visual must be an object")
+        else:
+            require_artifact(project, visual.get("contract"), "visual.contract", problems)
+            for key in ("baseline", "seed_audit", "production_audit"):
+                require_project_path(visual.get(key), f"visual.{key}", problems)
+        return problems
     require_artifact(project, seed.get("frame"), "seed.frame", problems)
     require_artifact(project, seed.get("composition_preview"), "seed.composition_preview", problems)
     require_artifact(project, seed.get("action_beat_preview"), "seed.action_beat_preview", problems)
@@ -331,7 +371,7 @@ def audit(project: Path, phase: str) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit reference-character Seed/production gates")
     parser.add_argument("--project", required=True, type=Path, help="project root")
-    parser.add_argument("--phase", required=True, choices=("seed", "production"))
+    parser.add_argument("--phase", required=True, choices=("draft", "seed", "production"))
     args = parser.parse_args()
 
     project = args.project.resolve()
