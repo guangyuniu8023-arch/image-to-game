@@ -27,6 +27,7 @@ bash scripts/selfcheck.sh
 
 - `GDD.md`：覆盖通用八模块，写明类型包继承项、项目调整项、来源和不适用理由；
 - `VISUAL_CONTRACT.json`：按 [visual-framing.md](visual-framing.md) 从本次需求推导，不含镜头表单或“游戏类型 → 固定镜头”路由；
+- `GAMEPLAY_CONTRACT.json`：从 GDD 模块 8 提取机器人、成功/失败/边界 case，以及每条规则实际存在的单侧或多侧情况；
 - `ASSET_LEDGER.md`：每件素材的职责、文件、生产方式、prompt/配方、日期、版本和验收状态；
 - 参考角色硬门适用时存在 version 2 `CHARACTER_PRODUCTION.json`；交给用户看 Seed 前依次运行视觉合同、Seed 运行时和角色生产三道门；
 - `index.html` 和 GDD 素材清单中声明的文件。
@@ -76,6 +77,17 @@ python3 scripts/audit_sprite_frames.py --frames-dir <sprites/action> --expected 
 | 竖版弹跳 | `node scripts/bot_doodle.js <index.html>` | 固定种子 3 次一致且 `WIN: true` |
 | 新类型 | 项目 GDD 模块 8 指定 | WIN/LOSE、死局和内容完整性断言全部通过 |
 
+机器人日志里的 `PASS` 不能单独作为交付证据。简单 H5 和新类型必须把 GDD 模块 8 写成 `GAMEPLAY_CONTRACT.json`，机器人将每个 case 的 expected/actual、至少两个真实 trace sample 和断言写入 `evidence/gameplay-audit.json`，再运行：
+
+```bash
+python3 scripts/audit_gameplay_report.py --project <项目目录> --contract-only
+node scripts/run_bot_guard.js --timeout-ms 10000 -- node <项目机器人.js> \
+  <项目目录>/index.html --report <项目目录>/evidence/gameplay-audit.json
+python3 scripts/audit_gameplay_report.py --project <项目目录>
+```
+
+合同至少包含 `success`、`failure`、`boundary` 三类。`coverage.required_sides` 必须逐条照抄 GDD 声明的真实情况：倒计时归零等单侧规则可只有 `time_up`；蓄力距离等多侧规则必须同时声明 `short/long`，命中框可声明 `inside/outside`。每个已声明侧都必须有独立 case；不得为满足形式编造不存在的第二侧，也不得把实际多侧规则缩成一侧。报告与当前 `index.html`、机器人和合同哈希绑定；旧报告、只跑成功路径、缺少任一已声明侧、无 trace 或直接写假终态都会失败。
+
 平台跳跃有意简化的实验项目可在 GDD 明确简化项后使用 `--lenient`；正式交付仍用严格模式。其他类型不得调用平台跳跃机器人，也不得通过删除断言、改机器人决策或延长无限时长掩盖游戏缺陷。
 
 ### 机器人时间与防卡死合同
@@ -97,7 +109,7 @@ node scripts/run_bot_guard.js --timeout-ms 10000 -- node <项目机器人.js> <i
 
 适用于单屏或单核心循环、无长内容遍历的 Canvas 小游戏；3D、长关卡和类型包另有硬门时按类型包执行。快速档只做最小充分验证：
 
-- CLI：一次完整成功路径、一次代表性失败路径、一次边界/判定宽度测试；固定种子下结果必须可复现。
+- CLI：一次完整成功路径、所有 GDD 声明的代表性失败侧、一次边界内和一次边界外测试；固定种子下结果必须可复现，并通过 `audit_gameplay_report.py`，不能只看机器人退出码。
 - 浏览器：确认页面加载、一次真实输入链和控制台零异常；不让自动化真实等待整局动画。
 - 视觉：标题、核心动作中段、终局三类主证据；横屏适配可复用其中一个状态。存在白名单 M 动作时，再补起势/事件帧/收势证据。若视觉合同包含参考系敏感或重新取景事件，再补输入前/动作中、镜头过渡中、收敛后三类确定性 case；这些 case 由需求推导，不按类型固定添加。
 - 把本轮截图组成一张 contact sheet，一次性交给 VLM 或人工自评；只有阻断性问题才重截受影响状态，不因微小 HUD 调整全量重拍。
@@ -121,7 +133,7 @@ node scripts/run_bot_guard.js --timeout-ms 10000 -- \
   --out <项目目录>/evidence/visual-production-audit.json
 ```
 
-两次都必须直接打开项目 `index.html`，调用真实 `window.__game.visualAudit.runCase`。运行时门检查目标 viewport 与 probe 完全一致、必须可见对象、world/HUD 空间、可见像素/几何测量口径、世界实体的 HUD 遮挡、锁定漂移、过渡收敛、有限坐标和批准基线漂移；HUD 实体只检查视口可见性，不得参与世界对象组或对自身触发遮挡失败。报告、合同、`index.html` 与 baseline 使用哈希绑定，角色审批门还会校验报告 attempt 等于 sidecar 账本中该阶段的最新次数；旧截图、旧 PASS 报告或先 PASS 后在别处失败都不能通过当前构建。
+两次都必须直接打开项目 `index.html`。审计先调用只读 `window.__game.visualAudit.snapshot` 捕获自然启动状态，再调用真实 `runCase`；标题页不能由测试接口临时强制出来。运行时门检查目标 viewport 与 probe 完全一致、主实体真实 `render_source`、必须可见对象、world/HUD 空间、可见像素/几何测量口径、世界实体的 HUD 遮挡、锁定漂移、重新取景前后的目标位移/指定轴位移/镜头实际位移、过渡收敛、有限坐标和批准基线漂移。HUD 实体只检查视口可见性，不得参与世界对象组或对自身触发遮挡失败。报告、合同、`index.html` 与 baseline 使用哈希绑定，角色审批门还会校验报告 attempt 等于 sidecar 账本中该阶段的最新次数；旧截图、旧 PASS 报告或先 PASS 后在别处失败都不能通过当前构建。
 
 截图状态由项目 GDD 模块 8 决定，至少覆盖：
 
@@ -167,10 +179,12 @@ node scripts/cdp_shot.js <url> <out.png> \
 
 ## 第 4 级：交付清单
 
-1. `index.html`、素材、`GDD.md`、`ASSET_LEDGER.md` 和验证证据放入持久项目目录；
-2. `index.html` 位于项目根，离线依赖随项目交付；
-3. 保存版本快照或 git commit，并备份源码；
-4. 回复用户版本/打开方式、操作说明、玩法简介和仍未解决的问题，不粘贴代码全文。
+1. `index.html`、素材、`GDD.md`、`ASSET_LEDGER.md`、两个合同和验证证据放入持久项目目录；
+2. 给 `index.html` 写 `<meta name="game-build" content="<build-id>">`，在发布目录写 `DELIVERY_MANIFEST.json`，记录 `build_id`、Skill commit、源码 index 哈希和全部运行时素材哈希；
+3. 发布前运行 `python3 scripts/audit_delivery_bundle.py --source <项目目录> --delivery <发布目录>`，缺 Sprite、复制到旧资源、HTML 与源码不一致或 build id 不一致一律失败；
+4. 公网部署后用浏览器读取 `game-build`，确认等于本轮 manifest，随后在公网地址重跑自然启动、一次真实输入链、资源加载和控制台检查。旧链接或旧 build 不得交付；
+5. 保存版本快照或 git commit，并备份源码；
+6. 回复用户版本/打开方式、`build_id`、操作说明、玩法简介和仍未解决的问题，不粘贴代码全文。
 
 ## 失败排查顺序
 

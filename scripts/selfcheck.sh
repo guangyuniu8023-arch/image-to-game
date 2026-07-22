@@ -188,10 +188,23 @@ contract = {
         "rationale": "precision input needs a stable reference, then landing changes the target"
     },
     "cases": [
-        {"name": "charge", "state": "charging", "behavior": "locked",
-         "required_visible": ["player", "target"], "max_frames": 4},
-        {"name": "settle", "state": "settled", "behavior": "transition",
-         "trigger_event": "landed", "required_visible": ["player", "target"], "max_frames": 12}
+        {"name": "boot", "entry": "natural", "state": "title", "behavior": "static",
+         "required_visible": ["player"], "required_render_sources": {
+             "player": {"seed": ["generated-seed"], "production": ["generated-seed"]}
+         }, "max_frames": 1},
+        {"name": "charge", "entry": "scripted", "state": "charging", "behavior": "locked",
+         "required_visible": ["player", "target"], "required_render_sources": {
+             "player": {"seed": ["generated-seed", "generated-sprite"],
+                        "production": ["generated-seed", "generated-sprite"]}
+         }, "max_frames": 4},
+        {"name": "settle", "entry": "scripted", "state": "settled", "behavior": "transition",
+         "before_state": "ready", "trigger_event": "landed",
+         "min_target_delta_px": 8, "min_camera_delta_px": 8,
+         "required_target_axes": ["y"], "min_axis_target_delta_px": 8,
+         "required_visible": ["player", "target"], "required_render_sources": {
+             "player": {"seed": ["generated-seed", "generated-sprite"],
+                        "production": ["generated-seed", "generated-sprite"]}
+         }, "max_frames": 12}
     ],
     "baseline": {"primary_entity": "player", "capture_cases": ["charge"],
                  "max_primary_area_delta_ratio": 0.2, "max_group_area_delta_ratio": 0.2},
@@ -220,6 +233,23 @@ cp.write_text(json.dumps(contract), encoding="utf-8")
 r = subprocess.run(["python3", f"{S}/audit_visual_contract.py", "--project", str(gate)], capture_output=True)
 res.append(("visual contract 缺实体space→FAIL", r.returncode != 0))
 contract["entities"]["player"]["space"] = saved_space
+cp.write_text(json.dumps(contract), encoding="utf-8")
+saved_boot = contract["cases"].pop(0)
+cp.write_text(json.dumps(contract), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_visual_contract.py", "--project", str(gate)], capture_output=True)
+res.append(("visual contract 缺自然启动封面→FAIL", r.returncode != 0))
+contract["cases"].insert(0, saved_boot)
+saved_axis = contract["cases"][2].pop("required_target_axes")
+cp.write_text(json.dumps(contract), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_visual_contract.py", "--project", str(gate)], capture_output=True)
+res.append(("visual contract 镜头过渡缺目标轴→FAIL", r.returncode != 0))
+contract["cases"][2]["required_target_axes"] = saved_axis
+saved_sources = contract["cases"][1]["required_render_sources"]["player"]["production"]
+contract["cases"][1]["required_render_sources"]["player"]["production"] = ["fallback"]
+cp.write_text(json.dumps(contract), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_visual_contract.py", "--project", str(gate)], capture_output=True)
+res.append(("visual contract 正式主角回退渲染→FAIL", r.returncode != 0))
+contract["cases"][1]["required_render_sources"]["player"]["production"] = saved_sources
 cp.write_text(json.dumps(contract), encoding="utf-8")
 
 digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
@@ -320,8 +350,8 @@ runtime_contract = json.loads(json.dumps(contract))
 <canvas id="game" width="400" height="700"></canvas><script>
 const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 function draw(){ctx.fillStyle='#102044';ctx.fillRect(0,0,400,700);ctx.fillStyle='#f26f8f';ctx.fillRect(80,400,80,100);ctx.fillStyle='#86c98a';ctx.fillRect(220,380,100,80);}
-function sample(x,targetX,state){return {state,viewport:{width:400,height:700},camera:{x,y:0,zoom:1,targetX,targetY:0,targetZoom:1},entities:{player:{basis:'visible-pixels',bounds:{x:80,y:400,width:80,height:100}},target:{basis:'geometry',bounds:{x:220,y:380,width:100,height:80}}},hud:[{bounds:{x:0,y:0,width:400,height:60}}]};}
-draw();window.__game={ready:true,visualAudit:{runCase(name){draw();if(name==='charge')return {samples:[sample(100,100,'charging'),sample(100,100,'charging')]};if(name==='settle')return {events:['landed'],samples:[sample(80,100,'settled'),sample(95,100,'settled'),sample(100,100,'settled')]};throw new Error('unknown case');}}};
+function sample(x,targetX,state,y=0,targetY=0,source='generated-sprite'){return {state,viewport:{width:400,height:700},camera:{x,y,zoom:1,targetX,targetY,targetZoom:1},entities:{player:{basis:'visible-pixels',render_source:source,bounds:{x:80,y:400,width:80,height:100}},target:{basis:'geometry',bounds:{x:220,y:380,width:100,height:80}}},hud:[{bounds:{x:0,y:0,width:400,height:60}}]};}
+draw();window.__game={ready:true,visualAudit:{snapshot(){return {samples:[sample(0,0,'title',0,0,'generated-seed')]};},runCase(name){draw();if(name==='charge')return {samples:[sample(100,100,'charging',0,0,'generated-seed'),sample(100,100,'charging',0,0,'generated-seed')]};if(name==='settle')return {events:['landed'],before:sample(0,0,'ready',0,0,'generated-seed'),samples:[sample(5,20,'ready',8,20,'generated-seed'),sample(20,20,'settled',20,20,'generated-seed')]};throw new Error('unknown case');}}};
 </script></body></html>''', encoding="utf-8")
 (runtime / "evidence").mkdir()
 (runtime / "evidence/retry-audit.json").write_text(json.dumps({
@@ -344,7 +374,7 @@ while IFS= read -r line; do
   case "$line" in OK__*) ok "${line#OK__}";; BAD__*) bad "${line#BAD__}";; esac
 done <<< "$B_RES"
 B_COUNT=$(printf '%s\n' "$B_RES" | grep -c "__")
-[ "$B_COUNT" -ge 19 ] || bad "工具冒烟段异常中断（仅 $B_COUNT/19 项有结果，python 可能有未捕获异常）"
+[ "$B_COUNT" -ge 22 ] || bad "工具冒烟段异常中断（仅 $B_COUNT/22 项有结果，python 可能有未捕获异常）"
 
 if node scripts/run_bot_guard.js --timeout-ms 1000 -- node -e 'process.exit(0)' >/dev/null 2>&1; then
   ok "run_bot_guard 保留成功退出码"
@@ -365,9 +395,19 @@ else
   bad "cdp_shot 严格就绪自检失败"
 fi
 if node scripts/audit_visual_runtime.js --self-test 2>&1 | grep -q "PASS"; then
-  ok "audit_visual_runtime 构图/锁定/基线夹具"
+  ok "audit_visual_runtime 自然启动/渲染源/真实镜头位移/基线夹具"
 else
   bad "audit_visual_runtime 自检失败"
+fi
+if python3 scripts/audit_gameplay_report.py --self-test 2>&1 | grep -q "PASS"; then
+  ok "audit_gameplay_report 单侧通过/多侧漏测拒绝/边界证据夹具"
+else
+  bad "audit_gameplay_report 自检失败"
+fi
+if python3 scripts/audit_delivery_bundle.py --self-test 2>&1 | grep -q "PASS"; then
+  ok "audit_delivery_bundle build-id/Sprite/哈希夹具"
+else
+  bad "audit_delivery_bundle 自检失败"
 fi
 cp -R "$TMP/runtime-visual" "$TMP/runtime-retry"
 RETRY_OUT=$(node scripts/audit_visual_runtime.js --project "$TMP/runtime-retry" --phase seed \
@@ -379,7 +419,9 @@ else
   bad "audit_visual_runtime 重试次数门失败（rc=$RETRY_RC）"
 fi
 
-if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
+if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 \
+    || [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] \
+    || [ -x "/Applications/Chromium.app/Contents/MacOS/Chromium" ]; then
   BROKEN_OUT=$(node scripts/run_bot_guard.js --timeout-ms 10000 -- \
       node scripts/audit_visual_runtime.js --project "$TMP/runtime-broken" --phase seed \
       --out "$TMP/runtime-broken/evidence/visual-seed-audit.json" 2>&1)
@@ -468,7 +510,8 @@ for p in [Path("references/platformer-2d.md"), Path("references/runner-3d.md"),
 required = {
     Path("references/gdd-strategy.md"): ["GDD.md", "ASSET_LEDGER.md", "### 8.", "动画决策表", "四道必要性门",
                                         "M / S / P", "生产白名单", "Sprite Contract", "交互 socket",
-                                        "VISUAL_CONTRACT.json", "visual-framing.md", "window.__game.visualAudit.runCase"],
+                                        "VISUAL_CONTRACT.json", "GAMEPLAY_CONTRACT.json", "visual-framing.md",
+                                        "window.__game.visualAudit.snapshot", "window.__game.visualAudit.runCase"],
     Path("references/assets.md"): ["阶段 A：GDD 设计参考", "阶段 B：素材生产与验收",
                                     "动画决策表", "生产白名单", "四道必要性门", "Seed Frame 批准门", "build_sprite_edit_canvas.py",
                                     "normalize_sprite_strip.py", "render_sprite_preview_sheet.py",
@@ -481,21 +524,26 @@ required = {
                                             "audit_visual_contract.py", "audit_visual_runtime.js", "attempt",
                                             "第 4 次直接拒绝执行", "space: \"world\" | \"hud\"",
                                             "viewport.width/height", "当前阶段真实存在",
-                                            ".visual-audit-attempts.jsonl", "JavaScript 异常"],
+                                            ".visual-audit-attempts.jsonl", "JavaScript 异常", "entry: \"natural\"",
+                                            "required_render_sources", "min_target_delta_px", "result.before"],
     Path("references/ui-kit.md"): ["阶段 A：GDD 设计参考", "阶段 B：UI 生产、集成与验收"],
     Path("references/verification.md"): ["动作时间线证据", "audit_sprite_frames.py", "物理事件帧",
                                          "生产白名单", "冗余动作检查", "机器人时间与防卡死合同",
                                          "固定 `dt`", "scripts/run_bot_guard.js", "布尔值 `true`", "真正截图前", "简单 H5 快速验证档",
                                          "CHARACTER_PRODUCTION.json", "scripts/audit_character_production.py",
                                          "VISUAL_CONTRACT.json", "audit_visual_runtime.js", "VLM 只负责观感",
-                                         "首次加两轮修复", "不得删除或换名报告绕过次数门"],
+                                         "首次加两轮修复", "不得删除或换名报告绕过次数门",
+                                         "GAMEPLAY_CONTRACT.json", "audit_gameplay_report.py", "audit_delivery_bundle.py",
+                                         "DELIVERY_MANIFEST.json", "game-build"],
     Path("SKILL.md"): ["## 类型注册表", "scripts/bot_platformer.js", "scripts/bot_match3.js", "scripts/bot_doodle.js", "scripts/runner_bot.js",
                        "动画最小充分集", "动画决策表", "生产白名单", "白名单动作节拍预览",
                        "简单单循环 H5", "scripts/run_bot_guard.js", "所选模板的素材接口",
                        "不得仅按“2D / 3D”", "不得为凑模板接口新增动作", "新增模板",
                        "参考角色生图是硬门", "CHARACTER_PRODUCTION.json", "scripts/audit_character_production.py",
                        "镜头策略由本次需求推导", "VISUAL_CONTRACT.json", "audit_visual_contract.py",
-                       "audit_visual_runtime.js", "window.__game.visualAudit.runCase", "actions` 必须为空",
+                       "audit_visual_runtime.js", "window.__game.visualAudit.snapshot", "window.__game.visualAudit.runCase",
+                       "GAMEPLAY_CONTRACT.json", "audit_gameplay_report.py", "audit_delivery_bundle.py",
+                       "DELIVERY_MANIFEST.json", "actions` 必须为空",
                        "未批准禁止任何动作生图调用", "API 请求前机械检查"],
 }
 for p, tokens in required.items():

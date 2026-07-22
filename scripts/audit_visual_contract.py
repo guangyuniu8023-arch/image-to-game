@@ -17,6 +17,7 @@ from typing import Any
 
 CONTRACT = "VISUAL_CONTRACT.json"
 BEHAVIORS = {"static", "locked", "transition", "settled"}
+ENTRIES = {"natural", "scripted"}
 MEASUREMENTS = {"visible-pixels", "geometry"}
 SPACES = {"world", "hud"}
 FORBIDDEN_KEYS = {
@@ -206,6 +207,11 @@ def audit(project: Path) -> tuple[dict[str, Any] | None, list[str]]:
     stable_case_states: set[str] = set()
     visible_coverage: set[str] = set()
     covered_retarget_events: set[str] = set()
+    natural_cases: list[tuple[int, str, str, str, int | None]] = []
+    primary_entities = {
+        name for name, entity in entities.items()
+        if isinstance(entity, dict) and entity.get("role") == "primary"
+    }
     for index, case in enumerate(cases):
         label = f"cases[{index}]"
         if not isinstance(case, dict):
@@ -222,12 +228,30 @@ def audit(project: Path) -> tuple[dict[str, Any] | None, list[str]]:
             problems.append(f"{label}.behavior must be one of {sorted(BEHAVIORS)}")
         if behavior in {"static", "locked", "settled"}:
             stable_case_states.add(state)
+        entry = case.get("entry")
+        if entry not in ENTRIES:
+            problems.append(f"{label}.entry must be one of {sorted(ENTRIES)}")
+        elif entry == "natural":
+            natural_cases.append((index, name, state, behavior, case.get("max_frames")))
         if behavior == "transition":
             trigger = text(case.get("trigger_event"), f"{label}.trigger_event", problems)
             if trigger:
                 covered_retarget_events.add(trigger)
                 if trigger not in retarget_events:
                     problems.append(f"{label}.trigger_event is not declared by reasoning.retarget_events: {trigger}")
+            text(case.get("before_state"), f"{label}.before_state", problems)
+            for key in ("min_target_delta_px", "min_camera_delta_px", "min_axis_target_delta_px"):
+                value = case.get(key)
+                if (
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    or value <= 0
+                ):
+                    problems.append(f"{label}.{key} must be a positive number for a real retarget transition")
+            axes = string_list(case.get("required_target_axes"), f"{label}.required_target_axes", problems)
+            for axis in axes:
+                if axis not in {"x", "y"}:
+                    problems.append(f"{label}.required_target_axes may only contain x or y: {axis}")
         required = string_list(case.get("required_visible"), f"{label}.required_visible", problems)
         if name:
             case_required[name] = required
@@ -235,6 +259,27 @@ def audit(project: Path) -> tuple[dict[str, Any] | None, list[str]]:
             visible_coverage.add(entity)
             if entity not in entities:
                 problems.append(f"{label}.required_visible references unknown entity: {entity}")
+        render_sources = case.get("required_render_sources")
+        if not isinstance(render_sources, dict):
+            problems.append(f"{label}.required_render_sources must be an object")
+            render_sources = {}
+        for entity in sorted(primary_entities.intersection(required)):
+            phase_sources = render_sources.get(entity)
+            if not isinstance(phase_sources, dict):
+                problems.append(
+                    f"{label}.required_render_sources.{entity} must define seed and production sources"
+                )
+                continue
+            for phase in ("seed", "production"):
+                sources = string_list(
+                    phase_sources.get(phase),
+                    f"{label}.required_render_sources.{entity}.{phase}",
+                    problems,
+                )
+                if "fallback" in {source.lower() for source in sources}:
+                    problems.append(
+                        f"{label}.required_render_sources.{entity}.{phase} must not accept fallback for a primary entity"
+                    )
         max_frames = case.get("max_frames")
         if not isinstance(max_frames, int) or isinstance(max_frames, bool) or not 1 <= max_frames <= 600:
             problems.append(f"{label}.max_frames must be an integer in 1..600")
@@ -252,6 +297,21 @@ def audit(project: Path) -> tuple[dict[str, Any] | None, list[str]]:
                 or case[key] < 0
             ):
                 problems.append(f"{label}.{key} must be a non-negative number")
+
+    if len(natural_cases) != 1:
+        problems.append("cases must contain exactly one natural boot case")
+    else:
+        index, name, state, behavior, max_frames = natural_cases[0]
+        if index != 0:
+            problems.append("the natural boot case must be cases[0] so it is captured before scripted mutation")
+        if name != "boot":
+            problems.append("the natural boot case name must be boot")
+        if state != "title":
+            problems.append("the natural boot case must end in title")
+        if behavior != "static":
+            problems.append("the natural boot case behavior must be static")
+        if max_frames != 1:
+            problems.append("the natural boot case max_frames must equal 1")
 
     for state in sensitive:
         if state not in case_states:

@@ -109,7 +109,7 @@ function cameraSample(sample, label, problems) {
   return Object.values(values).every(finite) ? values : null;
 }
 
-function validateCase(contract, caseDef, result) {
+function validateCase(contract, caseDef, result, phase = "production") {
   const problems = [];
   if (!result || typeof result !== "object" || !Array.isArray(result.samples) || !result.samples.length) {
     return { problems: [`case ${caseDef.name} returned no samples`], metrics: null };
@@ -171,6 +171,15 @@ function validateCase(contract, caseDef, result) {
       }
       if (entity.basis !== spec.measurement) {
         problems.push(`${label}.${entityName}.basis must be ${spec.measurement}`);
+      }
+      const phaseSources = caseDef.required_render_sources &&
+        caseDef.required_render_sources[entityName] &&
+        caseDef.required_render_sources[entityName][phase];
+      if (Array.isArray(phaseSources) && phaseSources.length && !phaseSources.includes(entity.render_source)) {
+        problems.push(
+          `${label}.${entityName}.render_source ${JSON.stringify(entity.render_source)} ` +
+          `must be one of ${JSON.stringify(phaseSources)} for ${phase}`,
+        );
       }
       const bounds = rect(entity.bounds, `${label}.${entityName}.bounds`, problems);
       if (!bounds || !viewport) continue;
@@ -240,6 +249,51 @@ function validateCase(contract, caseDef, result) {
             distances[index].zoom > distances[index - 1].zoom + zoomTol) {
           problems.push(`case ${caseDef.name} camera moved away from target at sample ${index}`);
           break;
+        }
+      }
+    }
+    if (caseDef.behavior === "transition") {
+      const beforeSample = result.before;
+      if (!beforeSample || typeof beforeSample !== "object") {
+        problems.push(`case ${caseDef.name} must return a real pre-trigger probe in result.before`);
+      } else {
+        if (beforeSample.state !== caseDef.before_state) {
+          problems.push(
+            `case ${caseDef.name} before.state must be ${caseDef.before_state}, got ${beforeSample.state}`,
+          );
+        }
+        const beforeCamera = cameraSample(beforeSample, `case ${caseDef.name} before`, problems);
+        if (beforeCamera) {
+          const afterTarget = camera[0];
+          const afterCamera = camera[camera.length - 1];
+          const targetDelta = Math.hypot(
+            afterTarget.targetX - beforeCamera.targetX,
+            afterTarget.targetY - beforeCamera.targetY,
+          );
+          const cameraDelta = Math.hypot(
+            afterCamera.x - beforeCamera.x,
+            afterCamera.y - beforeCamera.y,
+          );
+          if (targetDelta + 1e-9 < caseDef.min_target_delta_px) {
+            problems.push(
+              `case ${caseDef.name} retarget delta ${targetDelta.toFixed(3)} < ${caseDef.min_target_delta_px}`,
+            );
+          }
+          if (cameraDelta + 1e-9 < caseDef.min_camera_delta_px) {
+            problems.push(
+              `case ${caseDef.name} camera movement ${cameraDelta.toFixed(3)} < ${caseDef.min_camera_delta_px}`,
+            );
+          }
+          for (const axis of caseDef.required_target_axes || []) {
+            const key = axis === "x" ? "targetX" : "targetY";
+            const delta = Math.abs(afterTarget[key] - beforeCamera[key]);
+            if (delta + 1e-9 < caseDef.min_axis_target_delta_px) {
+              problems.push(
+                `case ${caseDef.name} target ${axis} delta ${delta.toFixed(3)} < ` +
+                `${caseDef.min_axis_target_delta_px}`,
+              );
+            }
+          }
         }
       }
     }
@@ -394,7 +448,12 @@ function killTree(child, signal) {
 
 async function launchChrome(width, height) {
   const port = await freePort();
-  const candidates = [process.env.CHROMIUM_BIN, "/usr/bin/chromium", "chromium", "chromium-browser"].filter(Boolean);
+  const candidates = [
+    process.env.CHROMIUM_BIN,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/usr/bin/chromium", "chromium", "chromium-browser",
+  ].filter(Boolean);
   let chrome = null;
   let launchError = null;
   for (const candidate of candidates) {
@@ -450,7 +509,9 @@ async function waitReady(client, pageErrors) {
   while (Date.now() < deadline) {
     try {
       const ready = await evaluate(client,
-        "!!window.__game && window.__game.ready === true && !!window.__game.visualAudit && typeof window.__game.visualAudit.runCase === 'function'");
+        "!!window.__game && window.__game.ready === true && !!window.__game.visualAudit && " +
+        "typeof window.__game.visualAudit.snapshot === 'function' && " +
+        "typeof window.__game.visualAudit.runCase === 'function'");
       if (ready === true) return;
     } catch (_) {}
     if (pageErrors.length && Date.now() - started >= 1000) {
@@ -518,12 +579,16 @@ function selfTest() {
     },
     baseline: { primary_entity: "player", capture_cases: ["charge"], max_primary_area_delta_ratio: 0.2, max_group_area_delta_ratio: 0.2 },
   };
-  const caseDef = { name: "charge", state: "charging", behavior: "locked", required_visible: ["player", "target", "meter"], max_frames: 4 };
-  const sample = (x = 100, height = 100) => ({
+  const sources = { player: { seed: ["generated-seed"], production: ["generated-sprite"] } };
+  const caseDef = {
+    name: "charge", entry: "scripted", state: "charging", behavior: "locked",
+    required_visible: ["player", "target", "meter"], required_render_sources: sources, max_frames: 4,
+  };
+  const sample = (x = 100, height = 100, renderSource = "generated-sprite") => ({
     state: "charging", viewport: { width: 400, height: 700 },
     camera: { x, y: 0, zoom: 1, targetX: x, targetY: 0, targetZoom: 1 },
     entities: {
-      player: { basis: "visible-pixels", bounds: { x: 80, y: 400, width: 80, height } },
+      player: { basis: "visible-pixels", render_source: renderSource, bounds: { x: 80, y: 400, width: 80, height } },
       target: { basis: "geometry", bounds: { x: 220, y: 380, width: 100, height: 80 } },
       meter: { basis: "geometry", bounds: { x: 20, y: 10, width: 120, height: 30 } },
     },
@@ -532,6 +597,25 @@ function selfTest() {
   const pass = validateCase(contract, caseDef, { samples: [sample(), sample()] });
   const tiny = validateCase(contract, caseDef, { samples: [sample(100, 30)] });
   const drift = validateCase(contract, caseDef, { samples: [sample(100), sample(110)] });
+  const fallback = validateCase(contract, caseDef, { samples: [sample(100, 100, "fallback")] });
+  const transitionCase = {
+    name: "retarget", entry: "scripted", state: "settled", before_state: "ready",
+    behavior: "transition", trigger_event: "landed", required_visible: ["player", "target"],
+    required_render_sources: sources, max_frames: 4, min_target_delta_px: 8,
+    min_camera_delta_px: 8, required_target_axes: ["y"], min_axis_target_delta_px: 8,
+  };
+  const transitionSample = (x, y, targetX, targetY, state = "settled") => ({
+    ...sample(x, 100), state,
+    camera: { x, y, zoom: 1, targetX, targetY, targetZoom: 1 },
+  });
+  const transition = validateCase(contract, transitionCase, {
+    events: ["landed"], before: transitionSample(0, 0, 0, 0, "ready"),
+    samples: [transitionSample(5, 8, 20, 20), transitionSample(20, 20, 20, 20)],
+  });
+  const fakeTransition = validateCase(contract, transitionCase, {
+    events: ["landed"], before: transitionSample(0, 0, 0, 0, "ready"),
+    samples: [transitionSample(0, 0, 0, 0), transitionSample(0, 0, 0, 0)],
+  });
   const wrongViewportSample = sample();
   wrongViewportSample.viewport = { width: 390, height: 700 };
   const wrongViewport = validateCase(contract, caseDef, { samples: [wrongViewportSample] });
@@ -545,8 +629,11 @@ function selfTest() {
     text: "Uncaught", url: "http://example.test/index.html", lineNumber: 4, columnNumber: 2,
     exception: { description: "TypeError: broken ready assignment\n at boot" },
   } });
-  if (!pass.problems.length && tiny.problems.some((p) => p.includes("visible height")) &&
+  if (!pass.problems.length && !transition.problems.length &&
+      tiny.problems.some((p) => p.includes("visible height")) &&
       drift.problems.some((p) => p.includes("drifted")) &&
+      fallback.problems.some((p) => p.includes("render_source")) &&
+      fakeTransition.problems.some((p) => p.includes("retarget delta")) &&
       wrongViewport.problems.some((p) => p.includes("must match contract")) &&
       mismatch.length && retryGuard && ledgerFirst === 1 && ledgerSecond === 2 &&
       exceptionDetail.includes("TypeError: broken ready assignment") && exceptionDetail.includes(":5:3")) {
@@ -554,7 +641,8 @@ function selfTest() {
     return 0;
   }
   console.error("VISUAL_RUNTIME_SELFTEST: FAIL", {
-    pass, tiny, drift, wrongViewport, mismatch, ledgerFirst, ledgerSecond, exceptionDetail,
+    pass, tiny, drift, fallback, transition, fakeTransition, wrongViewport, mismatch,
+    ledgerFirst, ledgerSecond, exceptionDetail,
   });
   return 1;
 }
@@ -630,9 +718,11 @@ async function main() {
     await client.send("Page.navigate", { url: `http://127.0.0.1:${served.port}/index.html?visualAudit=1` });
     await waitReady(client, pageErrors);
     for (const caseDef of contract.cases) {
-      const result = await evaluate(client,
-        `(async()=>await window.__game.visualAudit.runCase(${JSON.stringify(caseDef.name)}))()`);
-      const checked = validateCase(contract, caseDef, result);
+      const expression = caseDef.entry === "natural"
+        ? "(async()=>await window.__game.visualAudit.snapshot())()"
+        : `(async()=>await window.__game.visualAudit.runCase(${JSON.stringify(caseDef.name)}))()`;
+      const result = await evaluate(client, expression);
+      const checked = validateCase(contract, caseDef, result, args.phase);
       report.problems.push(...checked.problems);
       report.metrics[caseDef.name] = checked.metrics;
       const screenshot = path.join(evidenceDir, `visual-${args.phase}-${safeName(caseDef.name)}.png`);
