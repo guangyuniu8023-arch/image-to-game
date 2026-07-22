@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 消消乐无头机器人通关测试（match-3 版，参照 skill bot_harness.js 的 DOM-shim 思路）。
+ * 消消乐无头机器人通关测试（match-3 版，用 DOM/canvas 桩执行游戏逻辑）。
  *
  * 用法: node bot_match3.js <index.html>
  * 退出码: 0 = 全部通过（WIN: true + 死盘洗牌验证通过）；1 = 失败

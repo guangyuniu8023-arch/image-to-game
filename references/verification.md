@@ -1,89 +1,195 @@
-# 验证与交付细则
+# 类型化验证与交付细则
 
-游戏"看起来能跑"不算完成，必须证明"能通关"。按顺序执行四级验证。
+“看起来能跑”不算完成。验证必须消费项目 `GDD.md` 模块 8 的机器人入口、通过条件、完整性断言和关键截图状态；通用流程不假设某种玩法结构。
 
 ## 目录
 
-- 第 0 级：skill 自检（防回退，推 skill 改动前必跑）
-- 第 1 级：语法检查
-- 第 2 级：机器人通关（硬门槛）
-- 第 3 级：截图验收
+- 第 0 级：skill 自检
+- 第 1 级：设计与产物门
+- 第 2 级：语法、加载与类型机器人
+- 第 3 级：运行时构图/镜头门与视觉自评
 - 第 4 级：交付清单
-- 通关失败的排查顺序
+- 失败排查顺序
 
-## 第 0 级：skill 自检（防回退）
+## 第 0 级：skill 自检
 
-skill 自进化（变体积累/泛化/新工具入库）原则上是只加不改，但**脚本、模板、机器人会被编辑——旧能力回退只可能从这里进来**。防回退不靠记忆，靠一条命令：
-
-```bash
-bash scripts/selfcheck.sh   # 全绿才许推送 skill 改动；任一 FAIL 先修再推
-```
-
-三段覆盖：A 机器人回归（repo 内模板 + 同级目录参考项目：平台跳跃/消消乐/限时变体/doodle 3×/3D 跑酷——缺失的参考项目 SKIP 不判负）；B 工具冒烟（合成夹具即造即测，不依赖二进制夹具：audit_ui_align 正反两例、contact_sheet、取色、清理、切帧、抠图）；C 文档断链检查（SKILL.md + references/ 全部引用与 scripts/ 提及）。改任何 scripts/ 或模板后必跑；新增工具时必须给它补一条 B 段冒烟项（合成夹具），否则工具本身不受防回退保护。
-
-## 第 1 级：语法检查
-
-提取全部内联 `<script>` 块拼接后 `node --check`，0 报错才继续。
-
-## 第 2 级：机器人通关（硬门槛）
+修改 skill 后运行：
 
 ```bash
-node scripts/bot_harness.js <项目目录/index.html>
+bash scripts/selfcheck.sh
 ```
 
-- 期望输出 `WIN: true`，退出码 0。
-- 机器人会真实模拟按键跑完全程，能暴露：过宽缺口、过高台阶、重生点在坑上、敌人堵路、相机/碰撞 bug——这些靠看截图发现不了。
-- **完整性断言（与通关同等硬门槛）**：机器人在开玩前扫描关卡数据，强制校验 gdd.md 分段配方——关卡长度 ≥200 列、问号砖/砖块群/水管/台阶/浮台等机制已实现且数量达标、敌人 12~18 只、收集物 50~70 个。**"能通关但缺机制"同样判 FAIL**——能通关只证明下限，配方完整才证明没偷工。
-- 有意简化的实验项目（GDD 必须显式声明简化项）可用 `node scripts/bot_harness.js <index.html> 180 --lenient` 把断言降级为警告；正式交付物一律严格模式。
-- 每改一次关卡或物理参数，重跑一次。
+必须同时通过模板/夹具机器人、工具冒烟、文档断链和语义路由检查。支持类型的测试资源缺失只能报告未覆盖，不能把“SKIP”解释为该类型已回归。
 
-## 第 3 级：截图验收
+## 第 1 级：设计与产物门
+
+确认项目根存在：
+
+- `GDD.md`：覆盖通用八模块，写明类型包继承项、项目调整项、来源和不适用理由；
+- `VISUAL_CONTRACT.json`：按 [visual-framing.md](visual-framing.md) 从本次需求推导，不含镜头表单或“游戏类型 → 固定镜头”路由；
+- `GAMEPLAY_CONTRACT.json`：从 GDD 模块 8 提取机器人、成功/失败/边界 case，以及每条规则实际存在的单侧或多侧情况；
+- `ASSET_LEDGER.md`：每件素材的职责、文件、生产方式、prompt/配方、日期、版本和验收状态；
+- 参考角色硬门适用时存在 version 2 `CHARACTER_PRODUCTION.json`；交给用户看 Seed 前依次运行视觉合同、Seed 运行时和角色生产三道门；
+- `index.html` 和 GDD 素材清单中声明的文件。
+
+先运行：
 
 ```bash
-python3 scripts/make_ff_pages.py <index.html> /tmp/fftest 6,22,29
-cd /tmp/fftest && python3 -m http.server <端口> &
-chromium --headless=new --no-sandbox --disable-gpu \
-  --screenshot=<out.png> --window-size=430,932 http://localhost:<端口>/ff_22.html   # 竖屏
-# --window-size=1280,720 截横屏
-# 注意：macOS 无头 Chrome 最小窗口宽约 500px——竖屏验收用 --window-size=500,844，用 390 宽右缘会被裁掉
-# 注意：--screenshot 的相对路径不解析到 cwd——输出路径必须给绝对路径，否则截图静默写到别处
-# 注意：截图前 curl 校验返回内容的指纹（title/特征串）——本地端口可能被旧服务占用，截图会静默截到别的项目（实踩）
+python3 scripts/audit_visual_contract.py --project <项目目录>
 ```
 
-**滚动验缝**（shmup / doodle jump 实踩，滚动背景必做）：用游戏测试参数把滚动 offset 停在"接缝位于屏中"的帧截图，接缝 region 放大目检 + 行亮度剖面（接缝处相邻行跳变 ≤ 邻近自然纹理的跳变）。有缝 → 按 assets.md"滚动背景无缝红线"修：prompt 构图均匀化（无地平线/无大焦点）+ 集成 mirror-wrap + cover 适配。
+逐项核对玩法—角色—素材—Sprite—HUD—视觉策略—验证闭环。对任何承担动画职责的角色检查：
 
-**自评清单（机检过后的诚实反思，缺一项不许交付）**：机检 PASS ≠ 好看。对每张截图自问 6 条，"不行/不确定"先调再交付，本次未改的必须连同理由如实列给用户（配合"对比可视化交付"），**不许只报完成了什么**：
+- GDD 模块 6 存在动画决策表和生产白名单；只有通过四道必要性门的 M 与必要 S 动作进入 Sprite Contract；
+- 游戏加载表、状态机、强制测试状态中的每个角色动作都能追溯到生产白名单，不存在生产阶段补出的状态；
+- M 动作使用与媒介匹配的真实姿态变化，而不是整体位移、缩放或染色；
+- 生产阶段发生的设计变更必须回写 GDD，重新通过本级。
 
-1. **角色存在感**：主角/融合角色在画面里够大、够有戏吗？（实踩：118px 偏小偏孤单）
-2. **呼吸 vs 空旷**：负空间是"呼吸感"还是"死寂"？（实踩：球飞着时中场很静）
-3. **违和感**：每个元素是"从这个世界长出来的"还是"贴上去的"？（实踩：立绘贴挡板读不懂；Q 版换头丢 IP 被驳回）
-4. **构图避让**：装饰元素有没有抢戏/压字/压主角？（实踩：背景团块像气泡、标题压脸）
-5. **职责可读**：角色的作用一眼能看懂吗——操作/驱动/解说三档之一？（实踩：站挡板上不知干嘛 → 改角色本人接球）
-6. **风格打架**：字体性格、渲染技法、色系是否同一族？（实踩：Kenney 粗胖字配梦幻少女）
+对生产 2D 真实姿态帧的动作另检查：
 
-逐张目检至少 5 张：标题页（文案不溢出）、游戏中段（地形/敌人/特效正常、主角与砖块比例符合 gdd.md 体型基线）、终点区（旗杆/建筑/台阶）、竖屏（世界贴底、HUD 完整）、横屏窗口（竖屏舞台居中、两侧留边）。
+- GDD 模块 6 存在 Sprite Contract，生产白名单内的 M 动作不是“静态图 + 平移/缩放/染色”；
+- 新角色/新类型的 `ASSET_LEDGER.md` 有 Seed Frame、游戏构图预览和用户批准证据；
+- 生产白名单中每条需要真实帧的动作都有归一化帧、`sprite-meta.json`、preview 和 root/socket 定义；
+- 参考角色硬门适用时，正式角色入引擎前 `scripts/audit_character_production.py --phase production` PASS；Canvas 角色、缺 reference、待审批或缺 Sprite 证据都会判失败；
 
-**UI 对齐加验**：整图目检通过 ≠ 对齐合格——HUD chip/按钮/标题栏必须裁原生分辨率 region 放大 2~3 倍逐件验（文字上下留空差 ≤2px、icon 与文字中线共线）。**可执行载体**：
+再做一次**冗余动作检查**：若移除某动作后，玩家的输入、时机判断、空间判断和状态理解均不受影响，则该动作不得进入生产白名单。非终局动作还必须证明不会为表现而延迟恢复输入。
+
+## 第 2 级：语法、加载与类型机器人
+
+先提取全部内联 `<script>` 做 `node --check`，再确认资源加载门在成功和失败路径都能放行且不白屏。
+
+每条 2D 动作在入引擎前运行：
 
 ```bash
-python3 scripts/audit_ui_align.py 截图.png --region 左chip=x,y,w,h --region 右chip=x,y,w,h
-# 任一组件偏移/留空差 >±2px 退出码 1（可接 CI/机器人）；假设与调参见脚本头注释
+python3 scripts/audit_sprite_frames.py --frames-dir <sprites/action> --expected <N> \
+  --meta <sprites/action/sprite-meta.json> --anchor <seed.png> --min-distinct <M>
 ```
 
-案例与原理见 [ui-kit.md](ui-kit.md) ⑤ 第 5 条与④钉基线铁律。
+必须通过帧数、透明度、统一尺寸、root 基线、不同姿态数、socket 边界和可选 Seed 锁定检查。这些是几何硬门，不代替动作可读性目检。
+
+按类型注册调用机器人：
+
+| 类型 | 命令 | 通过条件 |
+|---|---|---|
+| 平台跳跃 | `node scripts/bot_platformer.js <index.html>` | `WIN: true` + platformer-2d 完整性断言 |
+| 3D 跑酷 | `node scripts/runner_bot.js <index.html> 120` | 类型包规定的存活/零受击断言 |
+| 消消乐 | `node scripts/bot_match3.js <index.html>` | `WIN: true` + 棋盘/死局断言 |
+| 竖版弹跳 | `node scripts/bot_doodle.js <index.html>` | 固定种子 3 次一致且 `WIN: true` |
+| 新类型 | 项目 GDD 模块 8 指定 | WIN/LOSE、死局和内容完整性断言全部通过 |
+
+机器人日志里的 `PASS` 不能单独作为交付证据。简单 H5 和新类型必须把 GDD 模块 8 写成 `GAMEPLAY_CONTRACT.json`，机器人将每个 case 的 expected/actual、至少两个真实 trace sample 和断言写入 `evidence/gameplay-audit.json`，再运行：
+
+```bash
+python3 scripts/audit_gameplay_report.py --project <项目目录> --contract-only
+node scripts/run_bot_guard.js --timeout-ms 10000 -- node <项目机器人.js> \
+  <项目目录>/index.html --report <项目目录>/evidence/gameplay-audit.json
+python3 scripts/audit_gameplay_report.py --project <项目目录>
+```
+
+合同至少包含 `success`、`failure`、`boundary` 三类。`coverage.required_sides` 必须逐条照抄 GDD 声明的真实情况：倒计时归零等单侧规则可只有 `time_up`；蓄力距离等多侧规则必须同时声明 `short/long`，命中框可声明 `inside/outside`。每个已声明侧都必须有独立 case；不得为满足形式编造不存在的第二侧，也不得把实际多侧规则缩成一侧。报告与当前 `index.html`、机器人和合同哈希绑定；旧报告、只跑成功路径、缺少任一已声明侧、无 trace 或直接写假终态都会失败。
+
+平台跳跃有意简化的实验项目可在 GDD 明确简化项后使用 `--lenient`；正式交付仍用严格模式。其他类型不得调用平台跳跃机器人，也不得通过删除断言、改机器人决策或延长无限时长掩盖游戏缺陷。
+
+### 机器人时间与防卡死合同
+
+机器人是确定性 CLI 测试，不是 VLM，也不应真实等待动画时间。项目机器人必须同时满足：
+
+1. 用固定 `dt`（2D 默认 `1/60`）调用游戏 `update(dt)` 推进；核心状态转换不得依赖真实 `setTimeout`。若非规则 UI 必须用定时器，测试环境实现可推进的 fake timer；禁止把必要定时器设成空函数后继续等待状态变化。
+2. 每个 `while`/推进循环都有最大模拟帧数，且每个状态有独立上限；超限立即打印状态、帧数和关键实体数值并退出码 1，不得无限等待。
+3. 每个模拟帧检查关键数值均为有限值，并断言 GDD 模块 8 声明的渲染范围，例如角色旋转、缩放、位置和锚点偏移。这样 CLI 即使不画 Canvas，也能抓住数百度旋转或异常拉伸。
+4. 最外层统一加进程级看门狗；简单 H5 默认 10 秒：
+
+```bash
+node scripts/run_bot_guard.js --timeout-ms 10000 -- node <项目机器人.js> <index.html>
+```
+
+退出码 `124` 表示机器人或子进程树超时。正常通过必须保留机器人原退出码和断言日志。
+
+### 简单 H5 快速验证档
+
+适用于单屏或单核心循环、无长内容遍历的 Canvas 小游戏；3D、长关卡和类型包另有硬门时按类型包执行。快速档只做最小充分验证：
+
+- CLI：一次完整成功路径、所有 GDD 声明的代表性失败侧、一次边界内和一次边界外测试；固定种子下结果必须可复现，并通过 `audit_gameplay_report.py`，不能只看机器人退出码。
+- 浏览器：确认页面加载、一次真实输入链和控制台零异常；不让自动化真实等待整局动画。
+- 视觉：标题、核心动作中段、终局三类主证据；横屏适配可复用其中一个状态。存在白名单 M 动作时，再补起势/事件帧/收势证据。若视觉合同包含参考系敏感或重新取景事件，再补输入前/动作中、镜头过渡中、收敛后三类确定性 case；这些 case 由需求推导，不按类型固定添加。
+- 把本轮截图组成一张 contact sheet，一次性交给 VLM 或人工自评；只有阻断性问题才重截受影响状态，不因微小 HUD 调整全量重拍。
+
+## 第 3 级：运行时构图/镜头门与视觉自评
+
+Seed 审批前运行：
+
+```bash
+node scripts/run_bot_guard.js --timeout-ms 10000 -- \
+  node scripts/audit_visual_runtime.js --project <项目目录> --phase seed \
+  --out <项目目录>/evidence/visual-seed-audit.json
+```
+
+正式交付前运行：
+
+```bash
+node scripts/run_bot_guard.js --timeout-ms 10000 -- \
+  node scripts/audit_visual_runtime.js --project <项目目录> --phase production \
+  --baseline <项目目录>/evidence/visual-baseline.json \
+  --out <项目目录>/evidence/visual-production-audit.json
+```
+
+两次都必须直接打开项目 `index.html`。审计先调用只读 `window.__game.visualAudit.snapshot` 捕获自然启动状态，再调用真实 `runCase`；标题页不能由测试接口临时强制出来。运行时门检查目标 viewport 与 probe 完全一致、主实体真实 `render_source`、必须可见对象、world/HUD 空间、可见像素/几何测量口径、世界实体的 HUD 遮挡、锁定漂移、重新取景前后的目标位移/指定轴位移/镜头实际位移、过渡收敛、有限坐标和批准基线漂移。HUD 实体只检查视口可见性，不得参与世界对象组或对自身触发遮挡失败。报告、合同、`index.html` 与 baseline 使用哈希绑定，角色审批门还会校验报告 attempt 等于 sidecar 账本中该阶段的最新次数；旧截图、旧 PASS 报告或先 PASS 后在别处失败都不能通过当前构建。
+
+截图状态由项目 GDD 模块 8 决定，至少覆盖：
+
+1. 标题/开始状态；
+2. 核心循环正常进行；
+3. GDD 判定实际适用的关键反馈；
+4. GDD 判定实际适用的终局状态；
+5. 竖屏，以及横屏窗口中 9:16 舞台居中留边。
+
+若核心循环含角色动画，还必须有**动作时间线证据**：每条核心动作至少捕获起势、物理事件帧和收势，或提供等价逐帧 preview/短录屏。证据必须显示：
+
+- 角色姿态确实变化，不是同一张图整体位移；
+- 物理球/子弹/道具在指定事件帧从交互 socket 释放或发生命中；
+- root anchor 稳定，角色不因帧包围盒变化而跳动；
+- 动作在实际游戏尺寸下仍可读，不遮挡主球路/判定点。
+
+只截取标题、游戏中和终局的静态画面不足以证明白名单 Sprite 动画通过。
+
+平台跳跃可用确定性快进适配器：
+
+```bash
+python3 scripts/make_ff_platformer_pages.py <index.html> /tmp/fftest 6,22,29
+```
+
+其他类型使用类型包截图方法；新类型在项目中建立 `?testState=<状态>`、固定种子、同步步进或等价确定性入口。禁止仅靠等待若干秒碰运气截图。
+
+通用 CDP 截图工具严格要求 `readyExpr` 返回**布尔值 `true`**，对象或数字都不算就绪；等待结束后、真正截图前会再次校验，防止瞬时就绪状态在 `extraWaitMs` 内漂移。默认 8 秒超时，失败时退出码 1 且不保存新截图：
+
+```bash
+node scripts/cdp_shot.js <url> <out.png> \
+  '!!window.__game && window.__game.ready === true' 500 844 100 8000
+```
+
+通用截图注意事项：
+
+- macOS 无头 Chrome 最小窗口宽约 500px，竖屏可用 `--window-size=500,844`；
+- screenshot 输出使用绝对路径；
+- 截图前检查页面 title/特征串，避免旧本地服务占端口；
+- 滚动背景必须停在接缝位于屏中的状态，检查 prompt 均匀构图、mirror-wrap 和 cover 适配；
+- HUD chip、按钮和标题栏裁原生 region 放大 2~3 倍检查，文字留空差 ≤2px、icon 与文字中线共线；可用 `scripts/audit_ui_align.py`。
+
+机检 PASS 后把当前视觉 cases 合成一张 contact sheet，交给 VLM 或人工逐张诚实自评：角色存在感、目标/路径判断、呼吸与空旷、镜头移动是否突兀、世界观违和、构图避让、职责可读、动作节拍/socket 交接、字体/渲染/色系是否打架。VLM 只负责观感，不代替几何和轨迹硬门。机器人通关、帧审计 PASS 都不能覆盖“动作不可读/画面难看”；任何“不行/不确定”按 visual-framing.md 分类后只修所属子系统。运行时报告的 `attempt` 由固定账本累计；Pi 正式任务使用控制器侧账本，项目 sidecar 只作普通环境回退。首次加两轮修复仍失败就停止并报告证据；不得删除或换名报告绕过次数门，修改合同或换输出路径也不能归零，ready 前页面异常应直接从报告修复。
 
 ## 第 4 级：交付清单
 
-1. `index.html` + 素材放入持久交付目录（index.html 必须在根目录，每项目独立子目录）
-2. 调用环境的版本工具保存版本（无则 git commit），message 简短概括本轮改动
-3. 源码备份到持久工作区
-4. 回复用户：版本号/打开方式 + 操作说明 + 一句玩法介绍；不粘贴游戏代码全文
+1. `index.html`、素材、`GDD.md`、`ASSET_LEDGER.md`、两个合同和验证证据放入持久项目目录；
+2. 给 `index.html` 写 `<meta name="game-build" content="<build-id>">`，在发布目录写 `DELIVERY_MANIFEST.json`，记录 `build_id`、Skill commit、源码 index 哈希和全部运行时素材哈希；
+3. 发布前运行 `python3 scripts/audit_delivery_bundle.py --source <项目目录> --delivery <发布目录>`，缺 Sprite、复制到旧资源、HTML 与源码不一致或 build id 不一致一律失败；
+4. 公网部署后用浏览器读取 `game-build`，确认等于本轮 manifest，随后在公网地址重跑自然启动、一次真实输入链、资源加载和控制台检查。旧链接或旧 build 不得交付；
+5. 保存版本快照或 git commit，并备份源码；
+6. 回复用户版本/打开方式、`build_id`、操作说明、玩法简介和仍未解决的问题，不粘贴代码全文。
 
-## 通关失败的排查顺序
+## 失败排查顺序
 
-1. 机器人在哪一列停下/死亡？→ 对照关卡数据看该处地形
-2. 缺口 > 4 格？台阶高差 > 3 格？→ 收窄/降低
-3. 检查点重生点正下方是不是坑？→ 移到实心地面上
-4. 敌人是否出生在台阶/砖块实体内部？→ 挪到平地
-5. 物理参数被改动过？→ 回到 gdd.md 基线值重测
-6. 以上都对还是过不去 → 在机器人里打印该处 `player.x/y/vx/vy` 逐帧分析，最后再考虑是不是机器人 AI 的局限（此时可手动放宽某一处地形，而不是改机器人）
+1. 失败的是设计门、资源门、规则断言、机器人通关、静态视觉合同、运行时轨迹还是 VLM 观感？先确定层级。
+2. 对照项目 GDD 的红线、数据不变量和 WIN/LOSE 定义，不跨类型套参数。
+3. 检查实现是否保持 GDD 的输入、状态、尺寸/锚点、碰撞、HUD 和回退契约。
+4. 随机类型先固定种子复现；动画类型先固定 dt；3D 类型同时看性能和 WebGL 防御。
+5. 游戏违反红线就改游戏或回写设计；只有机器人没有按已定义规则操作时才修机器人。
