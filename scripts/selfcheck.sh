@@ -203,6 +203,8 @@ contract = {
          }, "max_frames": 4},
         {"name": "settle", "entry": "scripted", "state": "settled", "behavior": "transition",
          "before_state": "ready", "trigger_event": "landed",
+         "transition_mode": "smooth", "transition_rationale": "preserve spatial continuity",
+         "min_transition_samples": 3,
          "min_target_delta_px": 8, "min_camera_delta_px": 8,
          "required_target_axes": ["y"], "min_axis_target_delta_px": 8,
          "required_visible": ["player", "target"], "required_render_sources": {
@@ -248,6 +250,11 @@ cp.write_text(json.dumps(contract), encoding="utf-8")
 r = subprocess.run(["python3", f"{S}/audit_visual_contract.py", "--project", str(gate)], capture_output=True)
 res.append(("visual contract 镜头过渡缺目标轴→FAIL", r.returncode != 0))
 contract["cases"][2]["required_target_axes"] = saved_axis
+saved_transition_mode = contract["cases"][2].pop("transition_mode")
+cp.write_text(json.dumps(contract), encoding="utf-8")
+r = subprocess.run(["python3", f"{S}/audit_visual_contract.py", "--project", str(gate)], capture_output=True)
+res.append(("visual contract 缺过渡形态→FAIL", r.returncode != 0))
+contract["cases"][2]["transition_mode"] = saved_transition_mode
 saved_sources = contract["cases"][1]["required_render_sources"]["player"]["production"]
 contract["cases"][1]["required_render_sources"]["player"]["production"] = ["fallback"]
 cp.write_text(json.dumps(contract), encoding="utf-8")
@@ -358,7 +365,7 @@ runtime_contract = json.loads(json.dumps(contract))
 const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 function draw(){ctx.fillStyle='#102044';ctx.fillRect(0,0,400,700);ctx.fillStyle='#f26f8f';ctx.fillRect(80,400,80,100);ctx.fillStyle='#86c98a';ctx.fillRect(220,380,100,80);}
 function sample(x,targetX,state,y=0,targetY=0,source='generated-sprite'){return {state,viewport:{width:400,height:700},camera:{x,y,zoom:1,targetX,targetY,targetZoom:1},entities:{player:{basis:'visible-pixels',render_source:source,bounds:{x:80,y:400,width:80,height:100}},target:{basis:'geometry',bounds:{x:220,y:380,width:100,height:80}}},hud:[{bounds:{x:0,y:0,width:400,height:60}}]};}
-draw();window.__game={ready:true,visualAudit:{snapshot(){return {samples:[sample(0,0,'title',0,0,'generated-seed')]};},runCase(name){draw();if(name==='charge')return {samples:[sample(100,100,'charging',0,0,'generated-seed'),sample(100,100,'charging',0,0,'generated-seed')]};if(name==='settle')return {events:['landed'],before:sample(0,0,'ready',0,0,'generated-seed'),samples:[sample(5,20,'ready',8,20,'generated-seed'),sample(20,20,'settled',20,20,'generated-seed')]};throw new Error('unknown case');}}};
+draw();window.__game={ready:true,visualAudit:{snapshot(){return {samples:[sample(0,0,'title',0,0,'generated-seed')]};},runCase(name){draw();if(name==='charge')return {samples:[sample(100,100,'charging',0,0,'generated-seed'),sample(100,100,'charging',0,0,'generated-seed')]};if(name==='settle')return {events:['landed'],before:sample(0,0,'ready',0,0,'generated-seed'),samples:[sample(5,20,'ready',8,20,'generated-seed'),sample(12,20,'ready',15,20,'generated-seed'),sample(20,20,'settled',20,20,'generated-seed')]};throw new Error('unknown case');}}};
 </script></body></html>''', encoding="utf-8")
 (runtime / "evidence").mkdir()
 (runtime / "evidence/retry-audit.json").write_text(json.dumps({
@@ -372,6 +379,17 @@ shutil.copytree(runtime, broken)
     "<!doctype html><script>throw new TypeError('fixture boot failure')</script>",
     encoding="utf-8",
 )
+
+snapped = tmp / "runtime-snapped"
+shutil.copytree(runtime, snapped)
+snap_source = (snapped / "index.html").read_text(encoding="utf-8")
+snapped_source = snap_source.replace(
+    "samples:[sample(5,20,'ready',8,20,'generated-seed'),sample(12,20,'ready',15,20,'generated-seed'),sample(20,20,'settled',20,20,'generated-seed')]",
+    "samples:[sample(20,20,'settled',20,20,'generated-seed'),sample(20,20,'settled',20,20,'generated-seed'),sample(20,20,'settled',20,20,'generated-seed')]",
+)
+if snapped_source == snap_source:
+    raise RuntimeError("snapped-camera fixture replacement did not match")
+(snapped / "index.html").write_text(snapped_source, encoding="utf-8")
 
 for n, p in res:
     print(("OK__" if p else "BAD__") + n)
@@ -445,6 +463,15 @@ if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null
     ok "audit_visual_runtime 真实 Chromium Seed 门"
   else
     bad "audit_visual_runtime 真实 Chromium Seed 门失败"
+  fi
+  SNAPPED_OUT=$(node scripts/run_bot_guard.js --timeout-ms 10000 -- \
+      node scripts/audit_visual_runtime.js --project "$TMP/runtime-snapped" --phase seed \
+      --out "$TMP/runtime-snapped/evidence/visual-seed-audit.json" 2>&1)
+  SNAPPED_RC=$?
+  if [ "$SNAPPED_RC" != 0 ] && printf '%s' "$SNAPPED_OUT" | grep -q "already settled"; then
+    ok "audit_visual_runtime 真实 Chromium 拒绝用瞬移伪装平滑跟随"
+  else
+    bad "audit_visual_runtime 平滑跟随反瞬移门失败（rc=$SNAPPED_RC）"
   fi
   if node scripts/run_bot_guard.js --timeout-ms 10000 -- \
       node scripts/audit_visual_runtime.js --project "$TMP/runtime-visual" --phase production \
@@ -532,7 +559,8 @@ required = {
                                             "第 4 次直接拒绝执行", "space: \"world\" | \"hud\"",
                                             "viewport.width/height", "当前阶段真实存在",
                                             ".visual-audit-attempts.jsonl", "JavaScript 异常", "entry: \"natural\"",
-                                            "required_render_sources", "min_target_delta_px", "result.before"],
+                                            "required_render_sources", "min_target_delta_px", "result.before",
+                                            "transition_mode", "min_transition_samples"],
     Path("references/ui-kit.md"): ["阶段 A：GDD 设计参考", "阶段 B：UI 生产、集成与验收"],
     Path("references/verification.md"): ["动作时间线证据", "audit_sprite_frames.py", "物理事件帧",
                                          "生产白名单", "冗余动作检查", "机器人时间与防卡死合同",
@@ -548,6 +576,7 @@ required = {
                        "不得仅按“2D / 3D”", "不得为凑模板接口新增动作", "新增模板",
                        "参考角色生图是硬门", "CHARACTER_PRODUCTION.json", "scripts/audit_character_production.py",
                        "镜头策略由本次需求推导", "VISUAL_CONTRACT.json", "audit_visual_contract.py",
+                       "transition_mode: smooth|cut",
                        "audit_visual_runtime.js", "window.__game.visualAudit.snapshot", "window.__game.visualAudit.runCase",
                        "GAMEPLAY_CONTRACT.json", "audit_gameplay_report.py", "audit_delivery_bundle.py",
                        "DELIVERY_MANIFEST.json", "actions` 必须为空",

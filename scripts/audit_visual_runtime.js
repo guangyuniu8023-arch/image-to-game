@@ -253,6 +253,39 @@ function validateCase(contract, caseDef, result, phase = "production") {
       }
     }
     if (caseDef.behavior === "transition") {
+      if (caseDef.transition_mode === "smooth") {
+        if (result.samples.length < caseDef.min_transition_samples) {
+          problems.push(
+            `case ${caseDef.name} smooth transition returned ${result.samples.length} samples; ` +
+            `requires at least ${caseDef.min_transition_samples}`,
+          );
+        }
+        const first = distances[0];
+        if (first.position <= pxTol && first.zoom <= zoomTol) {
+          problems.push(
+            `case ${caseDef.name} smooth transition camera was already settled in the first ` +
+            `post-trigger sample (px=${first.position.toFixed(3)}, zoom=${first.zoom.toFixed(4)})`,
+          );
+        }
+        const firstTarget = camera[0];
+        for (let index = 1; index < camera.length; index += 1) {
+          const targetDrift = Math.hypot(
+            camera[index].targetX - firstTarget.targetX,
+            camera[index].targetY - firstTarget.targetY,
+          );
+          if (targetDrift > pxTol || Math.abs(camera[index].targetZoom - firstTarget.targetZoom) > zoomTol) {
+            problems.push(`case ${caseDef.name} smooth transition target drifted at sample ${index}`);
+            break;
+          }
+        }
+      } else if (caseDef.transition_mode === "cut") {
+        const first = distances[0];
+        if (first.position > pxTol || first.zoom > zoomTol) {
+          problems.push(
+            `case ${caseDef.name} cut transition must settle in the first post-trigger sample`,
+          );
+        }
+      }
       const beforeSample = result.before;
       if (!beforeSample || typeof beforeSample !== "object") {
         problems.push(`case ${caseDef.name} must return a real pre-trigger probe in result.before`);
@@ -638,6 +671,8 @@ function selfTest() {
   const transitionCase = {
     name: "retarget", entry: "scripted", state: "settled", before_state: "ready",
     behavior: "transition", trigger_event: "landed", required_visible: ["player", "target"],
+    transition_mode: "smooth", transition_rationale: "preserve spatial continuity",
+    min_transition_samples: 3,
     required_render_sources: sources, max_frames: 4, min_target_delta_px: 8,
     min_camera_delta_px: 8, required_target_axes: ["y"], min_axis_target_delta_px: 8,
   };
@@ -647,7 +682,19 @@ function selfTest() {
   });
   const transition = validateCase(contract, transitionCase, {
     events: ["landed"], before: transitionSample(0, 0, 0, 0, "ready"),
-    samples: [transitionSample(5, 8, 20, 20), transitionSample(20, 20, 20, 20)],
+    samples: [
+      transitionSample(5, 8, 20, 20),
+      transitionSample(12, 15, 20, 20),
+      transitionSample(20, 20, 20, 20),
+    ],
+  });
+  const snappedSmooth = validateCase(contract, transitionCase, {
+    events: ["landed"], before: transitionSample(0, 0, 0, 0, "ready"),
+    samples: [
+      transitionSample(20, 20, 20, 20),
+      transitionSample(20, 20, 20, 20),
+      transitionSample(20, 20, 20, 20),
+    ],
   });
   const fakeTransition = validateCase(contract, transitionCase, {
     events: ["landed"], before: transitionSample(0, 0, 0, 0, "ready"),
@@ -685,6 +732,7 @@ function selfTest() {
       fallback.problems.some((p) => p.includes("render_source")) &&
       fakeTransition.problems.some((p) => p.includes("retarget delta")) &&
       preTriggerLeak.problems.some((p) => p.includes("retarget delta")) &&
+      snappedSmooth.problems.some((p) => p.includes("already settled")) &&
       wrongViewport.problems.some((p) => p.includes("must match contract")) &&
       mismatch.length && ledgerFirst === 1 && ledgerSecond === 2 && ledgerThird === 3 &&
       fourthRejected && controllerStable &&
@@ -694,6 +742,7 @@ function selfTest() {
   }
   console.error("VISUAL_RUNTIME_SELFTEST: FAIL", {
     pass, tiny, drift, fallback, fallbackDesign, transition, fakeTransition, preTriggerLeak,
+    snappedSmooth,
     wrongViewport, mismatch,
     ledgerFirst, ledgerSecond, ledgerThird, fourthRejected, controllerStable, exceptionDetail,
   });

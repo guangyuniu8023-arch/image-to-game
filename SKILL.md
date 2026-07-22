@@ -26,6 +26,7 @@ description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并
 12. **镜头策略由本次需求推导，不由表单或类型名决定**：读取 [references/visual-framing.md](references/visual-framing.md)，分析玩家决策、必须共同可见对象、参考系敏感状态、目标变化事件和 HUD 安全区，再组合跟随、目标组、前视、锁定、死区、阻尼或分区能力。类型包只提供能力，不得包含“游戏类型 → 固定镜头”的路由。把理由和运行时断言写入 `VISUAL_CONTRACT.json`，用静态合同门与浏览器轨迹门验证。
 13. **正式素材回退只保可运行，不算验收通过**：视觉 probe 必须报告主实体真实 `render_source`；Production case 不得接受 `fallback`。交付包必须带 `game-build` 元信息和 `DELIVERY_MANIFEST.json`，用 `scripts/audit_delivery_bundle.py` 对照源码与全部运行时 Sprite 哈希，公网链接再核对 build id 后才能返回用户。
 14. **阶段由控制器授权，不由执行模型自推进**：按 [references/pipeline-gates.md](references/pipeline-gates.md) 依次经过 design、seed、production。若存在只读 `/etc/pi/pipeline-controller.json`，执行模型只产出候选文件并以 `DESIGN_READY`、`SEED_READY` 或 `PRODUCTION_READY` 结束，不得自行调用 `audit_pipeline_stage.py` 或 `audit_visual_runtime.js`；外层控制器在模型进程退出后独立运行 Gate 并决定是否晋级。没有外层控制器的环境才由当前 Agent 运行相同 Gate。当前阶段失败时操作意图切换为诊断：保留稳定 `failure_signature`，只验证一个根因假设；相同 signature 再现或预算耗尽就以目标未完成状态停止当前阶段。不得换 run id、报告路径或环境变量重置 Gate。
+15. **镜头过渡形态也是需求断言**：每个重新取景 case 根据玩家感知、空间连续性和下一决策时机推导 `transition_mode: smooth|cut` 与理由，不由表单或类型名决定。`smooth` 必须保留真实中间帧、首帧未收敛且目标稳定；`cut` 必须首帧已稳定。不得用相机瞬移替代 GDD 声明的平滑跟随。
 
 ## 工作流一：0-1 创建（八步）
 

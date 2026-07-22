@@ -5,6 +5,8 @@
 ## 三阶段协议
 
 1. **design**：只生成 GDD、双合同、项目机器人/确定性接口、最小真实构图骨架和 `CHARACTER_PRODUCTION.json` draft。候选产物完成后运行 `audit_pipeline_stage.py --stage design --require-character-draft`；它用 debug/fallback 角色在真实浏览器执行合同全部 case，先证明 probe、镜头、状态与帧预算闭合。PASS 前禁止任何生图。
+
+Design 镜头门同时校验需求推导的过渡形态：`smooth` 需要首帧未收敛、至少三个真实触发后样本、稳定 target 和单调收敛；`cut` 需要首帧已稳定。不能用相机瞬移伪装平滑跟随。
 2. **seed**：只生成 manifest 指定的参考角色 Seed，接入真实骨架，制作基于 Seed 的动作节拍示意；候选产物完成后运行 `audit_pipeline_stage.py --stage seed`。PASS 后停止并等待用户批准。
 3. **production**：只消费用户批准的 Seed 和生产白名单，完成素材、游戏、机器人与交付；候选产物完成后运行 `audit_pipeline_stage.py --stage production`，再完成 delivery gate。
 

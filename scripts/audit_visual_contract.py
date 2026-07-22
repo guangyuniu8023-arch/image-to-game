@@ -17,6 +17,7 @@ from typing import Any
 
 CONTRACT = "VISUAL_CONTRACT.json"
 BEHAVIORS = {"static", "locked", "transition", "settled"}
+TRANSITION_MODES = {"smooth", "cut"}
 ENTRIES = {"natural", "scripted"}
 MEASUREMENTS = {"visible-pixels", "geometry"}
 SPACES = {"world", "hud"}
@@ -240,6 +241,23 @@ def audit(project: Path) -> tuple[dict[str, Any] | None, list[str]]:
                 if trigger not in retarget_events:
                     problems.append(f"{label}.trigger_event is not declared by reasoning.retarget_events: {trigger}")
             text(case.get("before_state"), f"{label}.before_state", problems)
+            transition_mode = case.get("transition_mode")
+            if transition_mode not in TRANSITION_MODES:
+                problems.append(
+                    f"{label}.transition_mode must be one of {sorted(TRANSITION_MODES)} and "
+                    "must be derived from the requirement/GDD"
+                )
+            text(case.get("transition_rationale"), f"{label}.transition_rationale", problems)
+            if transition_mode == "smooth":
+                min_samples = case.get("min_transition_samples")
+                if (
+                    not isinstance(min_samples, int)
+                    or isinstance(min_samples, bool)
+                    or min_samples < 3
+                ):
+                    problems.append(
+                        f"{label}.min_transition_samples must be an integer >= 3 for smooth motion"
+                    )
             for key in ("min_target_delta_px", "min_camera_delta_px", "min_axis_target_delta_px"):
                 value = case.get(key)
                 if (
@@ -283,6 +301,14 @@ def audit(project: Path) -> tuple[dict[str, Any] | None, list[str]]:
         max_frames = case.get("max_frames")
         if not isinstance(max_frames, int) or isinstance(max_frames, bool) or not 1 <= max_frames <= 600:
             problems.append(f"{label}.max_frames must be an integer in 1..600")
+        elif (
+            behavior == "transition"
+            and case.get("transition_mode") == "smooth"
+            and isinstance(case.get("min_transition_samples"), int)
+            and not isinstance(case.get("min_transition_samples"), bool)
+            and case["min_transition_samples"] > max_frames
+        ):
+            problems.append(f"{label}.min_transition_samples must not exceed max_frames")
         for key in (
             "min_visible_ratio",
             "max_hud_overlap_ratio",
