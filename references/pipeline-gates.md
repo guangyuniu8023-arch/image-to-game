@@ -1,53 +1,51 @@
-# 阶段 Gate 与失败诊断
+# 限时诊断与候选交付
 
-把易错的生产顺序交给环境控制器，不让执行模型自行决定是否进入下一阶段。阶段由产物生命周期驱动，与用户关键词、轮次和游戏类型无关。
+审计用于说明当前候选哪里可靠、哪里仍有问题，不负责授权模型进入下一阶段。生产保持一条主线：GDD → 可玩骨架 → 素材 → 完整游戏 → 限时验证 → 交付。
 
-## 三阶段协议
+## 状态语义
 
-1. **design**：只生成 GDD、双合同、项目机器人/确定性接口、最小真实构图骨架和 `CHARACTER_PRODUCTION.json` draft。候选产物完成后运行 `audit_pipeline_stage.py --stage design --require-character-draft`；它用 debug/fallback 角色在真实浏览器执行合同全部 case，先证明 probe、镜头、状态与帧预算闭合。PASS 前禁止任何生图。
+- `GAME_READY`：HTML 可启动、核心输入有效，GDD 标为核心的成功/失败/边界 case 与视觉/镜头 case 全部通过，正式角色素材按要求接入。任一核心 case 失败或未执行都不能报 READY。
+- `GAME_CANDIDATE`：HTML 可启动且可操作，但玩法、镜头、视觉、素材或证据仍有任一未通过/未执行的核心项。
+- `INCOMPLETE`：HTML 不存在、无法启动、启动即抛异常或核心输入完全不可用。只要工作区已有文件，仍必须返回路径和诊断。
 
-Design 镜头门同时校验需求推导的过渡形态：`smooth` 需要首帧未收敛、至少三个真实触发后样本、稳定 target 和单调收敛；`cut` 需要首帧已稳定。不能用相机瞬移伪装平滑跟随。
-2. **seed**：只生成 manifest 指定的参考角色 Seed，接入真实骨架，制作基于 Seed 的动作节拍示意；候选产物完成后运行 `audit_pipeline_stage.py --stage seed`。PASS 后停止并等待用户批准。
-3. **production**：只消费用户批准的 Seed 和生产白名单，完成素材、游戏、机器人与交付；候选产物完成后运行 `audit_pipeline_stage.py --stage production`，再完成 delivery gate。
+状态只描述质量，不控制文件可见性。任何状态都不得删除或隐藏已有候选。
 
-若 `/etc/pi/pipeline-controller.json` 存在，上述“运行 Gate”的主语始终是模型进程之外的控制器：执行模型只写候选产物并返回对应 `*_READY`，不得自己调用阶段 Gate。没有控制器的环境才由当前 Agent 同步执行 Gate。
+## 生产顺序
 
-`audit_pipeline_stage.py` 与 `audit_visual_runtime.js` 会机械执行该边界：controller-backed Pi 进程内调用返回 `DEFERRED_TO_CONTROLLER`，不创建 Gate 证据、不预约视觉重试。Seedream 适配器只被允许执行 design 静态预检，不可借此运行 Seed/production Gate。
+1. 保存 `GDD.md`，让玩法、角色职责、镜头、素材和必要动画先闭合。
+2. 建立可启动的 `index.html`，保存第一份持久候选；这是 GDD 后第一个实现检查点，必须早于首次网络生图。
+3. 按 GDD 调用素材工具。参考角色调用必须携带上传图；合同、manifest 或审计报告不是调用许可证。
+4. 接入素材并完成核心玩法。
+5. 运行一次限时主验证。只有报告给出单一明确根因时，允许一次定向修复和一次复测。
+6. 返回当前 HTML、素材、报告、状态和耗时。
 
-Controller-backed 候选生产只允许一次预览采样；若它暴露具体集成错误，可做一次针对性修复并再采样一次，随后必须返回 `*_READY`，由外层 Gate 给出正式 signature。禁止在 `/tmp` 自造反复 CDP/截图循环；没有正式 signature 就继续调参不算有效验证。
+## 审计运行方式
 
-环境存在 `/etc/pi/pipeline-controller.json` 时，以其中只读 `task_id`、`stage`、`repair_attempt` 和审计目录为唯一授权源；不得用环境变量、输出路径、报告换名或新会话 id 自行升级阶段或重置次数。其他环境可按同一语义接入自己的控制器。
-
-## 合同脚手架
-
-玩法内容仍由 GDD 模块 8 推导；脚本只固定易错的 JSON 结构：
+现有脚本继续保留标准退出码和报告，供 CI、Agent 与用户判断：
 
 ```bash
-python3 scripts/scaffold_gameplay_contract.py --project <项目> \
-  --bot <项目目录内的机器人路径> \
-  --success 'win=ready' \
-  --failure 'strength:short:too-short=gameover' \
-  --failure 'strength:long:too-long=gameover' \
-  --boundary 'hitbox:inside:edge-in=ready' \
-  --boundary 'hitbox:outside:edge-out=gameover'
+node scripts/run_bot_guard.js --timeout-ms 10000 -- \
+  node scripts/run_gameplay_runtime.js --project <项目目录>
+python3 scripts/audit_gameplay_report.py --project <项目目录>
+node scripts/audit_visual_runtime.js --project <项目目录> --phase production \
+  --run-id <本轮唯一ID，修复复测复用> \
+  --out <项目目录>/evidence/visual-production-audit.json
 ```
 
-参数名、规则、侧和 expected 必须来自本次 GDD；这不是用户表单，也不决定玩法、镜头或主题。
+退出码非零表示该项未通过，不表示应停止生成、禁止生图或拒绝返回 HTML。控制器应把失败摘要加入交付报告。
 
-## 失败 Loop
+## 时间与循环预算
 
-Gate 失败后先读取 `evidence/pipeline-<stage>-audit.json`：
+- 简单 H5 的机器人必须由 `run_bot_guard.js` 包裹，单次默认 10 秒。
+- 简单 H5 的首个候选优先生产一个核心动作 strip；只有第二动作通过独立的信息增量/姿态必要性证明且仍在总预算内才继续生产，避免素材调用挤掉游戏与验收。
+- 候选准备只运行一次主机器人；修复一个明确根因后最多复测一次。
+- Pi 控制器用 `task_id` 隔离预算；本地 Codex 传 `--run-id`，每个新用户请求/构建使用新 ID，同一次定向修复复测必须复用原 ID。预算不得按项目终身累计。
+- 不在 `/tmp` 创建多套等价 CDP/debug 脚本反复探测同一问题。
+- 达到任务 wall-clock timeout 后终止子进程树，保留工作区并输出候选路径。
+- 相同失败再次出现时停止自动修改，交付当前版本与证据。
 
-1. 用 `categories` 确认责任层；不跨层修改。
-2. 保留 `failure_signature`，写出一个可证伪的根因假设和对应文件。
-3. 只做该假设要求的最小修复，再由控制器授权复测。
-4. 相同 signature 再现、错误集合未减少或修复预算耗尽时，当前阶段转为 `INCOMPLETE/BLOCKED`；停止自动修补并返回证据。
+## Pi 兼容
 
-审计次数上限只终止当前阶段的失控执行，不把总体目标标记为完成。新的修复轮必须由外部控制器或用户根据诊断证据重新授权。
+旧控制器仍可写入 `stage: design|seed|production` 和 `repair_attempt`，但 `stage` 只用于日志和旧会话兼容，不再限制图片工具。执行模型始终按完整单线流程工作并以 `GAME_READY`、`GAME_CANDIDATE` 或 `INCOMPLETE` 结束。
 
-## 环境接入
-
-- 控制器应在模型进程外运行 Gate；模型产生候选产物，控制器判定 PASS/FAIL。
-- Seedream 适配器必须读取只读阶段授权：design 禁止调用；seed 只允许 manifest 声明的 reference Seed 输出；production 才开放批准后的白名单生产。
-- 视觉审计第三次失败后不得预约第四次，且不得用“超过上限”空报告覆盖第三次详细证据。
-- 每个阶段设置进程级 wall-clock timeout；超时返回未完成状态并保留工作区。
+外层控制器可以在模型退出后运行额外审计，但审计结果只能更新状态和问题列表，不能抹去、改名或拒绝暴露模型已经生成的候选。

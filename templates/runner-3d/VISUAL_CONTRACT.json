@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "source": "requirement-analysis",
+  "viewport": {
+    "width": 540,
+    "height": 960
+  },
+  "reasoning": {
+    "player_decision": "辨认角色所在车道并及时选择换道、跳跃或翻滚",
+    "must_see": [
+      "player"
+    ],
+    "reference_sensitive_states": [],
+    "retarget_events": []
+  },
+  "entities": {
+    "player": {
+      "role": "primary",
+      "space": "world",
+      "measurement": "geometry",
+      "min_visible_height_px": 40
+    }
+  },
+  "policy": {
+    "framing_subjects": [
+      "player"
+    ],
+    "lock_states": [],
+    "retarget_on": [],
+    "settle_before_states": [],
+    "rationale": "追尾视角直接以当前车道位置构图；换道后无需额外编造过渡状态"
+  },
+  "cases": [
+    {
+      "name": "boot",
+      "entry": "natural",
+      "state": "play",
+      "behavior": "static",
+      "required_visible": [
+        "player"
+      ],
+      "required_render_sources": {
+        "player": {
+          "seed": [
+            "template-voxel",
+            "template-2d"
+          ],
+          "production": [
+            "template-voxel",
+            "template-2d"
+          ]
+        }
+      },
+      "max_frames": 1
+    },
+    {
+      "name": "lane-right-settled",
+      "entry": "scripted",
+      "state": "play",
+      "behavior": "settled",
+      "required_visible": [
+        "player"
+      ],
+      "required_render_sources": {
+        "player": {
+          "seed": [
+            "template-voxel",
+            "template-2d"
+          ],
+          "production": [
+            "template-voxel",
+            "template-2d"
+          ]
+        }
+      },
+      "settle_tolerance_px": 0.01,
+      "settle_tolerance_zoom": 0.001,
+      "max_frames": 1
+    }
+  ],
+  "baseline": {
+    "primary_entity": "player",
+    "capture_cases": [
+      "boot",
+      "lane-right-settled"
+    ],
+    "max_primary_area_delta_ratio": 0.25,
+    "max_group_area_delta_ratio": 0.25
+  },
+  "artifacts": [
+    "index.html"
+  ],
+  "approval_artifacts": []
+}

@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "source": "requirement-analysis",
+  "viewport": {
+    "width": 540,
+    "height": 960
+  },
+  "reasoning": {
+    "player_decision": "辨认主角位置、落脚地面和前进方向",
+    "must_see": [
+      "player",
+      "route"
+    ],
+    "reference_sensitive_states": [],
+    "retarget_events": []
+  },
+  "entities": {
+    "player": {
+      "role": "primary",
+      "space": "world",
+      "measurement": "visible-pixels",
+      "min_visible_height_px": 60
+    },
+    "route": {
+      "role": "decision-context",
+      "space": "world",
+      "measurement": "geometry"
+    }
+  },
+  "policy": {
+    "framing_subjects": [
+      "player",
+      "route"
+    ],
+    "lock_states": [],
+    "retarget_on": [],
+    "settle_before_states": [],
+    "rationale": "横向跟随保留主角前方空间；静止后相机收敛到当前角色目标"
+  },
+  "cases": [
+    {
+      "name": "boot",
+      "entry": "natural",
+      "state": "play",
+      "behavior": "static",
+      "required_visible": [
+        "player",
+        "route"
+      ],
+      "required_render_sources": {
+        "player": {
+          "seed": [
+            "template-sprite"
+          ],
+          "production": [
+            "template-sprite"
+          ]
+        }
+      },
+      "max_frames": 1
+    },
+    {
+      "name": "running-settled",
+      "entry": "scripted",
+      "state": "play",
+      "behavior": "settled",
+      "required_visible": [
+        "player",
+        "route"
+      ],
+      "required_render_sources": {
+        "player": {
+          "seed": [
+            "template-sprite"
+          ],
+          "production": [
+            "template-sprite"
+          ]
+        }
+      },
+      "settle_tolerance_px": 1,
+      "settle_tolerance_zoom": 0.001,
+      "max_frames": 1
+    }
+  ],
+  "baseline": {
+    "primary_entity": "player",
+    "capture_cases": [
+      "boot",
+      "running-settled"
+    ],
+    "max_primary_area_delta_ratio": 0.25,
+    "max_group_area_delta_ratio": 0.25
+  },
+  "artifacts": [
+    "index.html",
+    "puppy.png"
+  ],
+  "approval_artifacts": []
+}

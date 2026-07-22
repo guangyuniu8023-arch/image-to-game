@@ -99,16 +99,27 @@ function fatal(msg) {
     + '<div class="label" style="padding:24px 18px">' + msg + '<br><br>' + BUILD + '</div></div>';
 }
 
+window.__game = { ready: false };
+
 /* ================= 输入 ================= */
 const keys = {};
+let gameplayAuditDriving = false, runnerAuditLastKey = "", runnerAuditHitType = "", runnerAuditSetup = {};
 addEventListener("keydown", e => {
   if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Space"].includes(e.code)) e.preventDefault();
-  keys[e.code] = true; anyKey();
+  keys[e.code] = true;
+  if (gameplayAuditDriving) runnerAuditLastKey = e.code;
+  anyKey();
 });
 addEventListener("keyup", e => keys[e.code] = false);
-let tx = 0, ty = 0;
-addEventListener("pointerdown", e => { tx = e.clientX; ty = e.clientY; anyKey(); });
+let tx = 0, ty = 0, gestureFromPlay = false;
+addEventListener("pointerdown", e => {
+  tx = e.clientX; ty = e.clientY;
+  gestureFromPlay = assetsReady && LG.state === "play";
+  anyKey();
+});
 addEventListener("pointerup", e => {
+  if (!gestureFromPlay) return;
+  gestureFromPlay = false;
   const dx = e.clientX - tx, dy = e.clientY - ty;
   if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
   if (Math.abs(dx) > Math.abs(dy)) keys[dx > 0 ? "ArrowRight" : "ArrowLeft"] = true;
@@ -140,7 +151,7 @@ const sfx = {
 /* ================= 逻辑层（纯数据，不依赖 THREE） ================= */
 const LANES = [-2.2, 0, 2.2];
 const LG = {
-  state: "title",      // title | play | gameover
+  state: "loading",    // loading | play | gameover
   speed: 12, maxSpeed: 30, dist: 0, score: 0, bones: 0, lives: 3,
   best: 0, time: 0, stateT: 0, slowT: 0,
   player: { lane: 0, x: 0, y: 0, vy: 0, rolling: 0, inv: 0 },
@@ -180,11 +191,13 @@ function newGame() {
   LG.score = 0; LG.bones = 0; LG.lives = 3; LG.time = 0; LG.slowT = 0;
   LG.player = { lane: 0, x: 0, y: 0, vy: 0, rolling: 0, inv: 0 };
   LG.obs = []; LG.bonesArr = []; LG.nextRowZ = -50; LG.seed = (Date.now() % 100000) + 1;
+  for (const code of Object.keys(keys)) keys[code] = false;
   syncHud(); showPanel(null);
 }
 
-function hitObstacle() {
+function hitObstacle(type = "unknown") {
   if (LG.player.inv > 0) return;
+  runnerAuditHitType = type;
   LG.lives--; LG.player.inv = 1.5; LG.slowT = 0.5; sfx.hit(); shakeT = 0.35;
   if (LG.lives <= 0) {
     LG.state = "gameover"; LG.stateT = 0; sfx.over();
@@ -248,7 +261,7 @@ function update(dt) {
     if (o.type === OB.TRAIN) hit = headY > 0.1;
     else if (o.type === OB.BARRIER) hit = feetY < 1.0;
     else if (o.type === OB.BEAM) hit = headY > 1.55;
-    if (hit) { hitObstacle(); break; }
+    if (hit) { hitObstacle(o.type); break; }
   }
   // 吃骨头
   for (const b of LG.bonesArr) {
@@ -261,15 +274,14 @@ function update(dt) {
 }
 
 function anyKey() {
-  if (!assetsReady) return;               // 资源未就绪不开局
-  if (LG.state === "title") newGame();
-  else if (LG.state === "gameover" && LG.stateT > 1.2) newGame();
+  if (!assetsReady || LG.state === "loading") return;
+  if (LG.state === "gameover" && LG.stateT > 1.2) newGame();
 }
 </script>
 <script>
 "use strict";
 /* ================= 3D 场景（程序化建模） ================= */
-let scene, camera, renderer, trackTex, yardTex, wallTex, wallTexR, sleepersMesh;
+let scene, camera, renderer, fallback2d, trackTex, yardTex, wallTex, wallTexR, sleepersMesh;
 const slData = [];                                    // 枕木滚动数据（实例矩阵每帧重建）
 const slM4 = typeof THREE !== "undefined" && THREE.Matrix4 ? new THREE.Matrix4() : null;
 function updateSleepers(spd, dt) {
@@ -283,23 +295,29 @@ function updateSleepers(spd, dt) {
   }
   sleepersMesh.instanceMatrix.needsUpdate = true;
 }
-/* 资源加载门：纹理 + DOM 图片全部就绪才开局，标题页显示进度条（杜绝慢网络下的占位/素模） */
+/* 资源加载门：纹理 + DOM 图片全部就绪或明确失败后自动开局 */
 const loadMgr = new THREE.LoadingManager();
 const texLoader = new THREE.TextureLoader(loadMgr);
 let assetsReady = false, texDone = 0, texTotal = 1, imgDone = 0;
-const domAssets = ["puppy.png", "btn_red.png", "btn_green.png", "chip_grey.png", "star.png", "star_o.png", "play.png"];
+const domAssets = ["btn_red.png", "chip_grey.png", "star.png", "star_o.png"];
 const imgTotal = domAssets.length;
 function loadProgress() { return { done: texDone + imgDone, total: texTotal + imgTotal }; }
 function updateLoadingUI() {
   const p = loadProgress();
-  assetsReady = p.done >= p.total;
+  assetsReady = p.done >= p.total && sceneAssetsBuilt;
   const bar = document.getElementById("loadbar"), txt = document.getElementById("loadtxt");
   if (bar) bar.style.width = (p.done / p.total * 100) + "%";
   if (txt) txt.textContent = "资源加载中 " + p.done + " / " + p.total;
-  if (assetsReady && LG.state === "title") showPanel("title");
+  if (assetsReady && LG.state === "loading") {
+    newGame();
+    window.__game.ready = true;
+  }
 }
 loadMgr.onProgress = (u, done, total) => { texDone = done; texTotal = total; updateLoadingUI(); };
-loadMgr.onLoad = () => { buildScenery(); buildPlayer(); updateLoadingUI(); };   // GLB 全部就绪后再建远景与角色
+let sceneAssetsBuilt = false;
+loadMgr.onLoad = () => {
+  buildScenery(); buildPlayer(); sceneAssetsBuilt = true; updateLoadingUI();
+};   // GLB 全部成功或明确失败后再建远景与角色，并放行加载门
 for (const src of domAssets) {
   const im = new Image();
   im.onload = im.onerror = () => { imgDone++; updateLoadingUI(); };
@@ -393,15 +411,20 @@ function initScene() {
   camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 400);
   camera.position.set(0, 4.1, 7.8);
   camera.lookAt(0, 1.35, -10);
-  try {
-    renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: !safeMode, stencil: false });
-  } catch (e) { fatal("当前设备/浏览器不支持 3D 渲染，请更换浏览器重试"); throw e; }
-  renderer.setPixelRatio(safeMode ? 1 : Math.min(devicePixelRatio, 1.5));   // 限像素比，防手机 GPU 显存爆掉丢上下文（整屏只剩底色）
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = !safeMode;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  // 上下文丢失兜底：立即进兼容模式重载
-  renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); enterSafeMode(); });
+  const canvas = document.getElementById("c");
+  const gl = canvas.getContext("webgl2", { antialias: !safeMode, stencil: false })
+    || canvas.getContext("webgl", { antialias: !safeMode, stencil: false });
+  if (gl) {
+    renderer = new THREE.WebGLRenderer({ canvas, context: gl, antialias: !safeMode, stencil: false });
+    renderer.setPixelRatio(safeMode ? 1 : Math.min(devicePixelRatio, 1.5));   // 限像素比，防手机 GPU 显存爆掉丢上下文（整屏只剩底色）
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = !safeMode;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // 上下文丢失兜底：立即进兼容模式重载
+    renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); enterSafeMode(); });
+  } else {
+    fallback2d = canvas.getContext("2d");
+  }
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x77aa55, 0.75));
   const sun = new THREE.DirectionalLight(0xfff5e0, 0.9);
@@ -997,22 +1020,13 @@ function showPanel(kind) {
   const hud = document.getElementById("hud");
   if (!kind) { el.style.display = "none"; hud.style.display = "flex"; return; }
   hud.style.display = "none"; el.style.display = "flex";
-  if (kind === "title") {
+  if (kind === "loading") {
     const verTag = '<div style="position:absolute;right:10px;bottom:8px;font-size:11px;color:#fff;opacity:.65;'
       + 'text-shadow:0 1px 2px rgba(0,0,0,.3)">' + BUILD + (safeMode ? " · 兼容模式" : "") + '</div>';
-    if (!assetsReady) {   // 资源加载中：Logo + 进度条
-      const p = loadProgress();
-      el.innerHTML = '<div class="logo">汪汪跑酷</div>'
-        + '<div class="loadwrap"><div class="loadbar" id="loadbar" style="width:' + (p.done / p.total * 100) + '%"></div></div>'
-        + '<div class="tips" id="loadtxt">资源加载中 ' + p.done + ' / ' + p.total + '</div>' + verTag;
-      return;
-    }
+    const p = loadProgress();
     el.innerHTML = '<div class="logo">汪汪跑酷</div>'
-      + '<div class="sub">PUPPY RUN</div>'
-      + '<div class="stars"><img src="star.png"><img src="star.png"><img src="star_o.png"></div>'
-      + '<img class="hero" src="puppy.png">'
-      + '<div class="btn">▶ 开始游戏</div>'
-      + '<div class="tips">← → 换道　 ↑ 跳跃　 ↓ 滑铲<br>手机：左右滑换道 · 上滑跳 · 下滑铲</div>' + verTag;
+      + '<div class="loadwrap"><div class="loadbar" id="loadbar" style="width:' + (p.done / p.total * 100) + '%"></div></div>'
+      + '<div class="tips" id="loadtxt">资源加载中 ' + p.done + ' / ' + p.total + '</div>' + verTag;
   } else if (kind === "over") {
     const starN = Math.min(3, 1 + Math.floor(LG.score / 4000));
     let stars = "";
@@ -1031,10 +1045,183 @@ function showPanel(kind) {
 let shakeT = 0;
 function updateCamera() {
   const px = LG.player.x;
-  camera.position.x = px * 0.55 + (shakeT > 0 ? (Math.random() - 0.5) * 0.3 : 0);
-  camera.position.y = 4.1 + (shakeT > 0 ? (Math.random() - 0.5) * 0.25 : 0);
+  cameraTargetX = px * 0.55;
+  cameraTargetY = 4.1;
+  cameraTargetZoom = 1;
+  camera.position.x = cameraTargetX + (shakeT > 0 ? (Math.random() - 0.5) * 0.3 : 0);
+  camera.position.y = cameraTargetY + (shakeT > 0 ? (Math.random() - 0.5) * 0.25 : 0);
+  camera.zoom = cameraTargetZoom;
   camera.lookAt(px * 0.4, 1.35, -10);
+  camera.updateProjectionMatrix();
 }
+
+let cameraTargetX = 0, cameraTargetY = 4.1, cameraTargetZoom = 1;
+
+/* ================= 标准运行时合同 ================= */
+const AUDIT_DT = 1 / 60;
+
+function clearRunnerAuditKeys() {
+  for (const code of Object.keys(keys)) keys[code] = false;
+}
+
+function runnerAuditReset(seed, setup) {
+  gameplayAuditDriving = true;
+  runnerAuditSetup = setup && typeof setup === "object" ? setup : {};
+  runnerAuditLastKey = "";
+  runnerAuditHitType = "";
+  newGame();
+  LG.seed = Number(seed) || 1;
+  clearRunnerAuditKeys();
+  if (runnerAuditSetup.disable_spawns) {
+    LG.obs = []; LG.bonesArr = []; LG.nextRowZ = -1000;
+  }
+  if (Number.isFinite(runnerAuditSetup.lives)) LG.lives = runnerAuditSetup.lives;
+  const next = runnerAuditSetup.player;
+  if (next && typeof next === "object") {
+    for (const key of ["lane", "x", "y", "vy", "rolling", "inv"]) {
+      if (Number.isFinite(next[key])) LG.player[key] = next[key];
+    }
+  }
+  if (Array.isArray(runnerAuditSetup.obstacles)) {
+    LG.obs = runnerAuditSetup.obstacles.map((item) => ({
+      lane: item.lane, z: item.z, type: item.type, len: item.len, mesh: null,
+    }));
+  }
+  renderRunnerAuditFrame();
+}
+
+function runnerAuditStep(dt) {
+  update(Number(dt) || AUDIT_DT);
+  renderRunnerAuditFrame();
+}
+
+function runnerAuditSnapshot() {
+  let result = `running:${LG.state}`;
+  let reason = "fixed-step-simulation-active";
+  let done = false;
+  if (LG.state === "gameover") {
+    result = `gameover:${runnerAuditHitType || "unknown"}`;
+    reason = `${runnerAuditHitType || "unknown"}-collision-ended-run`; done = true;
+  } else if (runnerAuditSetup.probe === "lane-limit" && runnerAuditLastKey === "ArrowLeft") {
+    result = LG.player.lane === 0 ? "clamped:left-lane" : "escaped:left-lane";
+    reason = LG.player.lane === 0 ? "lane-index-lower-bound-held" : "lane-index-left-bound-failed"; done = true;
+  } else if (runnerAuditSetup.probe === "lane-limit" && runnerAuditLastKey === "ArrowRight") {
+    result = LG.player.lane === 2 ? "clamped:right-lane" : "escaped:right-lane";
+    reason = LG.player.lane === 2 ? "lane-index-upper-bound-held" : "lane-index-right-bound-failed"; done = true;
+  } else if (LG.state === "play" && LG.dist >= 30) {
+    result = "running:distance-30"; reason = "auto-run-covered-thirty-metres"; done = true;
+  }
+  return {
+    state: LG.state,
+    position: { x: LG.player.x, y: LG.player.y, z: -LG.dist },
+    result, reason, done,
+  };
+}
+
+function runnerPlayerBounds() {
+  const stageRect = document.getElementById("stage").getBoundingClientRect();
+  if (!renderer) {
+    const width = 70, height = 82;
+    const centerX = stageRect.left + stageRect.width / 2 + LG.player.x * stageRect.width / 8.8;
+    const bottomY = stageRect.top + stageRect.height * 0.82 - LG.player.y * 52;
+    return { x: centerX - width / 2, y: bottomY - height, width, height };
+  }
+  if (!dog || !dog.g || !camera) return { x: 0, y: 0, width: 1, height: 1 };
+  scene.updateMatrixWorld(true); camera.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(dog.g);
+  const xs = [], ys = [];
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) {
+    for (const z of [box.min.z, box.max.z]) {
+      const point = new THREE.Vector3(x, y, z).project(camera);
+      xs.push(stageRect.left + (point.x + 1) * stageRect.width / 2);
+      ys.push(stageRect.top + (1 - point.y) * stageRect.height / 2);
+    }
+  }
+  const left = Math.min(...xs), right = Math.max(...xs);
+  const top = Math.min(...ys), bottom = Math.max(...ys);
+  return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+function runnerVisualProbe() {
+  const stageRect = document.getElementById("stage").getBoundingClientRect();
+  return {
+    state: LG.state,
+    viewport: { width: Math.round(stageRect.width), height: Math.round(stageRect.height) },
+    camera: {
+      x: camera.position.x,
+      y: camera.position.y,
+      zoom: camera.zoom,
+      targetX: cameraTargetX,
+      targetY: cameraTargetY,
+      targetZoom: cameraTargetZoom,
+    },
+    entities: {
+      player: {
+        basis: "geometry",
+        render_source: renderer && dog && dog.g ? "template-voxel" : "template-2d",
+        bounds: runnerPlayerBounds(),
+      },
+    },
+    hud: [{ bounds: { x: stageRect.left, y: stageRect.top, width: stageRect.width, height: 76 } }],
+  };
+}
+
+function drawRunnerFallback() {
+  if (!fallback2d) return;
+  const canvas = document.getElementById("c"), g = fallback2d;
+  const w = canvas.width, h = canvas.height;
+  const sky = g.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, "#87CEEB"); sky.addColorStop(1, "#d9f2ff");
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#a5907a";
+  g.beginPath(); g.moveTo(w * 0.2, h); g.lineTo(w * 0.43, h * 0.34);
+  g.lineTo(w * 0.57, h * 0.34); g.lineTo(w * 0.8, h); g.closePath(); g.fill();
+  g.strokeStyle = "#e8edf0"; g.lineWidth = 4;
+  for (const lane of [-1, 0, 1]) {
+    const near = w / 2 + lane * w * 0.22, far = w / 2 + lane * w * 0.055;
+    g.beginPath(); g.moveTo(near, h); g.lineTo(far, h * 0.34); g.stroke();
+  }
+  const bounds = runnerPlayerBounds();
+  g.fillStyle = "rgba(0,0,0,.2)";
+  g.beginPath(); g.ellipse(bounds.x + bounds.width / 2, bounds.y + bounds.height, 38, 10, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#F5EDE0"; g.strokeStyle = "#26211E"; g.lineWidth = 4;
+  g.fillRect(bounds.x + 10, bounds.y + 30, bounds.width - 20, bounds.height - 30);
+  g.strokeRect(bounds.x + 10, bounds.y + 30, bounds.width - 20, bounds.height - 30);
+  g.fillStyle = "#F5EDE0";
+  g.beginPath(); g.arc(bounds.x + bounds.width / 2, bounds.y + 25, 25, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.fillStyle = "#26211E";
+  g.beginPath(); g.arc(bounds.x + 26, bounds.y + 22, 4, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(bounds.x + 44, bounds.y + 22, 4, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#E53935"; g.fillRect(bounds.x + 12, bounds.y + 42, bounds.width - 24, 8);
+}
+
+function renderRunnerAuditFrame() {
+  if (!scene || !camera) return;
+  updatePlayerMesh(); syncWorld(); updateCamera();
+  if (renderer) renderer.render(scene, camera);
+  else drawRunnerFallback();
+}
+
+function runnerVisualCase(name) {
+  if (name !== "lane-right-settled") throw new Error("unknown visual audit case: " + name);
+  runnerAuditReset(731942, { disable_spawns: true });
+  keys.ArrowRight = true;
+  for (let frame = 0; frame < 30; frame++) update(AUDIT_DT);
+  keys.ArrowRight = false;
+  for (let frame = 0; frame < 30; frame++) update(AUDIT_DT);
+  renderRunnerAuditFrame();
+  return { samples: [runnerVisualProbe()] };
+}
+
+window.__game.gameplayAudit = {
+  reset: runnerAuditReset,
+  step: runnerAuditStep,
+  snapshot: runnerAuditSnapshot,
+};
+window.__game.visualAudit = {
+  snapshot() { return { samples: [runnerVisualProbe()] }; },
+  runCase: runnerVisualCase,
+};
 
 /* ================= 主循环（带渲染守卫：连续失败自动进兼容模式） ================= */
 let lastT = 0, renderFails = 0, frames = 0, frameDt = 0;
@@ -1045,7 +1232,7 @@ function loop(t) {
   if (dt < 0) dt = 0;
   frameDt = dt;
   try {
-    update(dt);
+    if (!gameplayAuditDriving) update(dt);
     const spd = LG.state === "play" ? (LG.slowT > 0 ? LG.speed * 0.45 : LG.speed) : 0;
     if (spd > 0) {
       trackTex.offset.y += spd * dt / 13.33;
@@ -1059,10 +1246,11 @@ function loop(t) {
     updatePlayerMesh();
     syncWorld();
     updateCamera();
-    renderer.render(scene, camera);
+    if (renderer) renderer.render(scene, camera);
+    else drawRunnerFallback();
     renderFails = 0;
     // 渲染看门狗：资源就绪后 90 帧仍 0 个 drawcall = 静默不渲染（画布透明只剩底色）
-    if (assetsReady && ++frames === 90 && renderer.info.render.calls === 0) enterSafeMode();
+    if (renderer && assetsReady && ++frames === 90 && renderer.info.render.calls === 0) enterSafeMode();
   } catch (e) {
     if (++renderFails >= 3) enterSafeMode();
   }
@@ -1082,12 +1270,15 @@ function layout() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+  } else {
+    const canvas = document.getElementById("c");
+    canvas.width = w; canvas.height = h;
   }
 }
 try { LG.best = parseInt(localStorage.getItem("runner_best")) || 0; } catch (e) {}
 initScene();
 layout();
-showPanel("title");
+showPanel("loading");
 addEventListener("resize", layout);
 requestAnimationFrame(loop);
 </script>

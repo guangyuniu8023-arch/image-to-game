@@ -102,7 +102,8 @@ def audit_harness(project: Path, problems: list[str], checks: list[dict]) -> Non
 
 
 def audit_stage(
-    project: Path, stage: str, require_character_draft: bool, run_design_runtime: bool = True
+    project: Path, stage: str, require_character_draft: bool, run_design_runtime: bool = True,
+    run_id: str | None = None,
 ) -> dict:
     scripts = Path(__file__).resolve().parent
     problems: list[str] = []
@@ -129,15 +130,21 @@ def audit_stage(
             f"character-{phase}", problems, checks,
         )
     if stage == "design" and run_design_runtime and not problems:
+        command = ["node", str(scripts / "audit_visual_runtime.js"), "--project", str(project),
+                   "--phase", "design", "--out", str(project / "evidence/visual-design-audit.json")]
+        if run_id:
+            command.extend(["--run-id", run_id])
         run_command(
-            ["node", str(scripts / "audit_visual_runtime.js"), "--project", str(project),
-             "--phase", "design", "--out", str(project / "evidence/visual-design-audit.json")],
+            command,
             "visual-runtime-design", problems, checks,
         )
     if stage == "seed" and not problems:
+        command = ["node", str(scripts / "audit_visual_runtime.js"), "--project", str(project), "--phase", "seed",
+                   "--out", str(project / "evidence/visual-seed-audit.json")]
+        if run_id:
+            command.extend(["--run-id", run_id])
         run_command(
-            ["node", str(scripts / "audit_visual_runtime.js"), "--project", str(project), "--phase", "seed",
-             "--out", str(project / "evidence/visual-seed-audit.json")],
+            command,
             "visual-runtime-seed", problems, checks,
         )
         if not problems:
@@ -146,10 +153,15 @@ def audit_stage(
                 "character-seed-final", problems, checks,
             )
     if stage == "production" and not problems:
+        command = ["node", str(scripts / "audit_visual_runtime.js"), "--project", str(project), "--phase", "production",
+                   "--out", str(project / "evidence/visual-production-audit.json")]
+        baseline = project / "evidence/visual-baseline.json"
+        if baseline.is_file():
+            command.extend(["--baseline", str(baseline)])
+        if run_id:
+            command.extend(["--run-id", run_id])
         run_command(
-            ["node", str(scripts / "audit_visual_runtime.js"), "--project", str(project), "--phase", "production",
-             "--baseline", str(project / "evidence/visual-baseline.json"),
-             "--out", str(project / "evidence/visual-production-audit.json")],
+            command,
             "visual-runtime-production", problems, checks,
         )
         if not problems:
@@ -208,7 +220,7 @@ def self_test() -> int:
                                          "min_visible_height_px": 80}},
             "policy": {"framing_subjects": ["player"], "lock_states": [], "retarget_on": [],
                        "settle_before_states": [], "rationale": "keep the player visible"},
-            "cases": [{"name": "boot", "entry": "natural", "state": "title", "behavior": "static",
+            "cases": [{"name": "boot", "entry": "natural", "state": "ready", "behavior": "static",
                        "required_visible": ["player"], "required_render_sources": {
                            "player": {"seed": ["generated-seed"], "production": ["generated-seed"]}},
                        "max_frames": 1}],
@@ -263,6 +275,7 @@ def main() -> int:
     parser.add_argument("--project", type=Path)
     parser.add_argument("--stage", choices=sorted(STAGES))
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--run-id", help="unique local task/build id; reuse only for its one repair retry")
     parser.add_argument("--require-character-draft", action="store_true")
     parser.add_argument("--controller-preflight", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--self-test", action="store_true")
@@ -287,6 +300,7 @@ def main() -> int:
     report = audit_stage(
         project, args.stage, args.require_character_draft,
         run_design_runtime=not args.controller_preflight,
+        run_id=args.run_id,
     )
     path = write_report(project, args.stage, report, args.out)
     print(json.dumps({"status": report["status"], "stage": args.stage,

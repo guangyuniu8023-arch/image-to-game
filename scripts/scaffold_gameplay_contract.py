@@ -50,13 +50,36 @@ def build_contract(bot: str, success: list[str], failure: list[str], boundary: l
     names = [case["name"] for case in cases]
     if len(names) != len(set(names)):
         raise ValueError("case names must be unique")
+    # Schema-correct runner plan. The caller must replace the generic setup,
+    # key and frame budget with the GDD-derived scenario before runtime audit.
+    for index, case in enumerate(cases):
+        case["driver"] = {
+            "seed": 4242 + index,
+            "dt": 1 / 60,
+            "max_frames": 120,
+            "setup": {},
+            "inputs": [
+                {"frame": 1, "action": "primary", "phase": "press", "code": "Space"},
+                {"frame": 2, "action": "primary", "phase": "release", "code": "Space"},
+            ],
+        }
 
     grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
+    expected_by_group: dict[tuple[str, str], list[str]] = defaultdict(list)
     for case in cases:
         if case["category"] in {"failure", "boundary"}:
             key = (case["category"], case["rule"])
             if case["side"] not in grouped[key]:
                 grouped[key].append(case["side"])
+            expected_by_group[key].append(case["expected"])
+    for key, sides in grouped.items():
+        expected = expected_by_group[key]
+        if len(sides) > 1 and len(expected) != len(set(expected)):
+            category, rule = key
+            raise ValueError(
+                f"{category} rule {rule} has multiple sides but repeated expected values; "
+                "use a distinct semantic outcome for each side"
+            )
     coverage = [
         {"category": category, "rule": rule, "required_sides": sides}
         for (category, rule), sides in grouped.items()
@@ -80,7 +103,7 @@ def self_test() -> int:
         contract = build_contract(
             "scripts/bot.js",
             ["win=ready"],
-            ["strength:short:too-short=gameover", "strength:long:too-long=gameover"],
+            ["strength:short:too-short=gameover:short", "strength:long:too-long=gameover:long"],
             ["hitbox:inside:edge-in=ready", "hitbox:outside:edge-out=gameover"],
         )
         (project / "GAMEPLAY_CONTRACT.json").write_text(
@@ -91,11 +114,21 @@ def self_test() -> int:
 
         good = not audit(project, None, contract_only=True)
         rejected = False
+        duplicate_outcome_rejected = False
         try:
             build_contract("scripts/bot.js", ["win=ready"], [], ["r:s:n=x"])
         except ValueError:
             rejected = True
-    if good and rejected:
+        try:
+            build_contract(
+                "scripts/bot.js",
+                ["win=ready"],
+                ["strength:short:too-short=gameover", "strength:long:too-long=gameover"],
+                ["hitbox:inside:edge-in=ready"],
+            )
+        except ValueError:
+            duplicate_outcome_rejected = True
+    if good and rejected and duplicate_outcome_rejected:
         print("GAMEPLAY_CONTRACT_SCAFFOLD_SELFTEST: PASS")
         return 0
     print("GAMEPLAY_CONTRACT_SCAFFOLD_SELFTEST: FAIL")
@@ -103,7 +136,16 @@ def self_test() -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=(
+            "example: --success perfect=READY --failure jump:short:too-short=FAIL_SHORT "
+            "--failure jump:over:too-far=FAIL_OVER "
+            "--boundary hitbox:inside:edge-in=READY "
+            "--boundary hitbox:outside:edge-out=FAIL_OUTSIDE"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--project", type=Path)
     parser.add_argument("--bot")
     parser.add_argument("--success", action="append", default=[])

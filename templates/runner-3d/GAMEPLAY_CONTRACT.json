@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "source": "gdd-module-8",
+  "bot": "skill:run_gameplay_runtime.js",
+  "viewport": {
+    "width": 540,
+    "height": 960
+  },
+  "required_categories": [
+    "success",
+    "failure",
+    "boundary"
+  ],
+  "coverage": [
+    {
+      "category": "failure",
+      "rule": "obstacle-response",
+      "required_sides": [
+        "train",
+        "barrier"
+      ]
+    },
+    {
+      "category": "boundary",
+      "rule": "lane-limit",
+      "required_sides": [
+        "left",
+        "right"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "survive-distance",
+      "category": "success",
+      "expected": "running:distance-30",
+      "driver": {
+        "seed": 731942,
+        "dt": 0.016666666666666666,
+        "max_frames": 180,
+        "setup": { "disable_spawns": true },
+        "inputs": [
+          { "frame": 1, "action": "lane-right", "phase": "press", "code": "ArrowRight" },
+          { "frame": 2, "action": "lane-right", "phase": "release", "code": "ArrowRight" }
+        ]
+      }
+    },
+    {
+      "name": "train-collision",
+      "category": "failure",
+      "rule": "obstacle-response",
+      "side": "train",
+      "expected": "gameover:train",
+      "driver": {
+        "seed": 731943,
+        "dt": 0.016666666666666666,
+        "max_frames": 2,
+        "setup": {
+          "disable_spawns": true,
+          "lives": 1,
+          "player": { "lane": 0, "x": -2.2 },
+          "obstacles": [{ "lane": 0, "z": -0.1, "type": "train", "len": 10 }]
+        },
+        "inputs": [
+          { "frame": 1, "action": "jump", "phase": "press", "code": "ArrowUp" },
+          { "frame": 2, "action": "jump", "phase": "release", "code": "ArrowUp" }
+        ]
+      }
+    },
+    {
+      "name": "barrier-collision",
+      "category": "failure",
+      "rule": "obstacle-response",
+      "side": "barrier",
+      "expected": "gameover:barrier",
+      "driver": {
+        "seed": 731944,
+        "dt": 0.016666666666666666,
+        "max_frames": 2,
+        "setup": {
+          "disable_spawns": true,
+          "lives": 1,
+          "player": { "lane": 0, "x": -2.2 },
+          "obstacles": [{ "lane": 0, "z": 0, "type": "barrier", "len": 0.6 }]
+        },
+        "inputs": [
+          { "frame": 1, "action": "roll", "phase": "press", "code": "ArrowDown" },
+          { "frame": 2, "action": "roll", "phase": "release", "code": "ArrowDown" }
+        ]
+      }
+    },
+    {
+      "name": "left-lane-limit",
+      "category": "boundary",
+      "rule": "lane-limit",
+      "side": "left",
+      "expected": "clamped:left-lane",
+      "driver": {
+        "seed": 731945,
+        "dt": 0.016666666666666666,
+        "max_frames": 1,
+        "setup": { "probe": "lane-limit", "disable_spawns": true, "player": { "lane": 0, "x": -2.2 } },
+        "inputs": [
+          { "frame": 1, "action": "lane-left", "phase": "press", "code": "ArrowLeft" }
+        ]
+      }
+    },
+    {
+      "name": "right-lane-limit",
+      "category": "boundary",
+      "rule": "lane-limit",
+      "side": "right",
+      "expected": "clamped:right-lane",
+      "driver": {
+        "seed": 731946,
+        "dt": 0.016666666666666666,
+        "max_frames": 1,
+        "setup": { "probe": "lane-limit", "disable_spawns": true, "player": { "lane": 2, "x": 2.2 } },
+        "inputs": [
+          { "frame": 1, "action": "lane-right", "phase": "press", "code": "ArrowRight" }
+        ]
+      }
+    }
+  ]
+}

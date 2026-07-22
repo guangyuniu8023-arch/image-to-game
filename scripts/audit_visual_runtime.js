@@ -13,7 +13,7 @@ const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
 function usage() {
-  console.error("用法: node scripts/audit_visual_runtime.js --project DIR --phase design|seed|production --out FILE [--baseline FILE]");
+  console.error("用法: node scripts/audit_visual_runtime.js --project DIR --phase design|seed|production --out FILE [--baseline FILE] [--run-id ID]");
 }
 
 function parseArgs(argv) {
@@ -580,29 +580,34 @@ function readControllerIdentity(controllerPath = PIPELINE_CONTROLLER_FILE) {
   return { taskId, stateDir };
 }
 
-function attemptLedgerLocation(project, controllerPath = PIPELINE_CONTROLLER_FILE) {
+function attemptLedgerLocation(project, controllerPath = PIPELINE_CONTROLLER_FILE, explicitRunId = null) {
   const controller = readControllerIdentity(controllerPath);
   if (controller) {
     const root = path.resolve(controller.stateDir);
     const id = crypto.createHash("sha256").update(controller.taskId).update("\0").update(project).digest("hex");
-    return { path: path.join(root, `${id}.jsonl`), reference: `controller://${id}` };
+    return { path: path.join(root, `${id}.jsonl`), reference: `controller://${id}`, runId: controller.taskId };
   }
   const stateDir = process.env.VISUAL_AUDIT_STATE_DIR;
-  const runId = process.env.VISUAL_AUDIT_RUN_ID;
+  const runId = explicitRunId || process.env.VISUAL_AUDIT_RUN_ID;
   if (stateDir || runId) {
-    if (!stateDir || !runId || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,126}[A-Za-z0-9]$/.test(runId)) {
-      throw new Error("controller audit state requires valid VISUAL_AUDIT_STATE_DIR and VISUAL_AUDIT_RUN_ID");
+    if (!runId || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,126}[A-Za-z0-9]$/.test(runId)) {
+      throw new Error("visual audit requires a valid --run-id (or VISUAL_AUDIT_RUN_ID)");
     }
-    const root = path.resolve(stateDir);
+    const root = stateDir ? path.resolve(stateDir) : path.join(project, "evidence", ".visual-audit-runs");
     const id = crypto.createHash("sha256").update(runId).update("\0").update(project).digest("hex");
-    return { path: path.join(root, `${id}.jsonl`), reference: `controller://${id}` };
+    return {
+      path: path.join(root, `${id}.jsonl`),
+      reference: stateDir ? `controller://${id}` : path.relative(project, path.join(root, `${id}.jsonl`)),
+      runId,
+    };
   }
-  const ledgerPath = path.join(project, "evidence", ".visual-audit-attempts.jsonl");
-  return { path: ledgerPath, reference: path.relative(project, ledgerPath) };
+  throw new Error(
+    "visual audit outside the Pi controller requires --run-id; create one per user request/build and reuse it only for the single repair retry",
+  );
 }
 
-function reserveAttempt(project, phase, prior, contractSha, controllerPath = PIPELINE_CONTROLLER_FILE) {
-  const location = attemptLedgerLocation(project, controllerPath);
+function reserveAttempt(project, phase, prior, contractSha, controllerPath = PIPELINE_CONTROLLER_FILE, runId = null) {
+  const location = attemptLedgerLocation(project, controllerPath, runId);
   const ledgerPath = location.path;
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   let ledgerAttempts = 0;
@@ -618,22 +623,23 @@ function reserveAttempt(project, phase, prior, contractSha, controllerPath = PIP
       }
     }
   }
+  const priorMatchesRun = prior && prior.run_id === location.runId;
   const completedAttempts = Math.max(
     ledgerAttempts,
-    prior && prior.phase === phase && Number.isInteger(prior.attempt) ? prior.attempt : 0,
+    priorMatchesRun && prior.phase === phase && Number.isInteger(prior.attempt) ? prior.attempt : 0,
   );
-  if (completedAttempts >= 3) {
+  if (completedAttempts >= 2) {
     throw new Error(
-      "visual audit repair limit reached: the detailed third-attempt report is terminal; " +
+      "visual audit repair limit reached: the detailed second-attempt report is terminal; " +
       "do not reserve another attempt",
     );
   }
   const attempt = completedAttempts + 1;
   fs.appendFileSync(ledgerPath, `${JSON.stringify({
-    version: 1, phase, attempt, contract_sha256: contractSha,
+    version: 1, run_id: location.runId, phase, attempt, contract_sha256: contractSha,
     reserved_at: new Date().toISOString(),
   })}\n`);
-  return { attempt, ledgerPath, ledgerReference: location.reference };
+  return { attempt, ledgerPath, ledgerReference: location.reference, runId: location.runId };
 }
 
 function selfTest() {
@@ -715,10 +721,16 @@ function selfTest() {
   fs.writeFileSync(controllerPath, JSON.stringify({ task_id: "self-test-task", audit_state_dir: stateDir }));
   const ledgerFirst = reserveAttempt(ledgerProject, "seed", null, "abc", controllerPath).attempt;
   const ledgerSecond = reserveAttempt(ledgerProject, "seed", null, "changed-contract", controllerPath).attempt;
-  const ledgerThird = reserveAttempt(ledgerProject, "seed", null, "changed-contract", controllerPath).attempt;
-  let fourthRejected = false;
+  let thirdRejected = false;
   try { reserveAttempt(ledgerProject, "seed", null, "changed-contract", controllerPath); }
-  catch (error) { fourthRejected = error.message.includes("third-attempt report is terminal"); }
+  catch (error) { thirdRejected = error.message.includes("second-attempt report is terminal"); }
+  const noController = path.join(ledgerProject, "missing-controller.json");
+  const localFirst = reserveAttempt(ledgerProject, "production", null, "abc", noController, "local-build-a");
+  const localSecond = reserveAttempt(ledgerProject, "production", null, "abc", noController, "local-build-a");
+  const priorFromOldRun = { version: 1, run_id: "local-build-a", phase: "production", attempt: 2 };
+  const nextBuildFirst = reserveAttempt(
+    ledgerProject, "production", priorFromOldRun, "abc", noController, "local-build-b",
+  );
   process.env.VISUAL_AUDIT_RUN_ID = "model-attempted-override";
   const controllerLocation = attemptLedgerLocation(ledgerProject, controllerPath);
   const controllerStable = controllerLocation.reference.includes("controller://");
@@ -734,8 +746,9 @@ function selfTest() {
       preTriggerLeak.problems.some((p) => p.includes("retarget delta")) &&
       snappedSmooth.problems.some((p) => p.includes("already settled")) &&
       wrongViewport.problems.some((p) => p.includes("must match contract")) &&
-      mismatch.length && ledgerFirst === 1 && ledgerSecond === 2 && ledgerThird === 3 &&
-      fourthRejected && controllerStable &&
+      mismatch.length && ledgerFirst === 1 && ledgerSecond === 2 &&
+      thirdRejected && controllerStable && localFirst.attempt === 1 && localSecond.attempt === 2 &&
+      nextBuildFirst.attempt === 1 &&
       exceptionDetail.includes("TypeError: broken ready assignment") && exceptionDetail.includes(":5:3")) {
     console.log("VISUAL_RUNTIME_SELFTEST: PASS");
     return 0;
@@ -744,7 +757,7 @@ function selfTest() {
     pass, tiny, drift, fallback, fallbackDesign, transition, fakeTransition, preTriggerLeak,
     snappedSmooth,
     wrongViewport, mismatch,
-    ledgerFirst, ledgerSecond, ledgerThird, fourthRejected, controllerStable, exceptionDetail,
+    ledgerFirst, ledgerSecond, thirdRejected, controllerStable, exceptionDetail,
   });
   return 1;
 }
@@ -767,6 +780,7 @@ async function main() {
   const contractPath = path.join(project, "VISUAL_CONTRACT.json");
   const outputPath = path.resolve(args.out);
   const evidenceDir = path.dirname(outputPath);
+  const baselineRequested = typeof args.baseline === "string" && args.baseline.length > 0;
   const baselinePath = path.resolve(args.baseline || path.join(project, "evidence", "visual-baseline.json"));
   if (outputPath !== project && !outputPath.startsWith(`${project}${path.sep}`)) {
     console.error("output must stay inside project"); return 2;
@@ -778,12 +792,12 @@ async function main() {
     try { priorReport = JSON.parse(fs.readFileSync(outputPath, "utf8")); } catch (_) {}
   }
   let reserved;
-  try { reserved = reserveAttempt(project, args.phase, priorReport, initialContractSha); }
+  try { reserved = reserveAttempt(project, args.phase, priorReport, initialContractSha, PIPELINE_CONTROLLER_FILE, args["run-id"] || null); }
   catch (error) { console.error(`VISUAL_RUNTIME_AUDIT: FAIL ${error.message}`); return 1; }
   const attempt = reserved.attempt;
   const report = {
-    version: 1, phase: args.phase, status: "FAIL", generated_at: new Date().toISOString(),
-    attempt, repair_limit: 3,
+    version: 1, run_id: reserved.runId, phase: args.phase, status: "FAIL", generated_at: new Date().toISOString(),
+    attempt, repair_limit: 2,
     attempt_ledger: reserved.ledgerReference,
     contract_sha256: initialContractSha, index_sha256: null, artifact_sha256: null,
     baseline_sha256: null, metrics: {}, cases: [], problems: [],
@@ -799,7 +813,7 @@ async function main() {
     report.index_sha256 = sha256File(path.join(project, "index.html"));
     report.artifact_sha256 = artifactDigest(project, contract.artifacts);
     let baseline = null;
-    if (args.phase === "production") {
+    if (args.phase === "production" && baselineRequested) {
       baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
       report.baseline_sha256 = sha256File(baselinePath);
       if (baseline.contract_sha256 !== report.contract_sha256) {
@@ -840,7 +854,7 @@ async function main() {
         samples: result && Array.isArray(result.samples) ? result.samples.length : 0,
       });
     }
-    if (args.phase === "production") {
+    if (args.phase === "production" && baselineRequested) {
       report.problems.push(...compareBaseline(contract, report.metrics, baseline));
     }
     if (!report.problems.length) {
@@ -868,7 +882,7 @@ async function main() {
     if (chrome) { killTree(chrome, "SIGTERM"); await sleep(150); killTree(chrome, "SIGKILL"); }
     if (server) await new Promise((resolve) => server.close(resolve));
   }
-  if (report.status !== "PASS" && attempt >= 3 &&
+  if (report.status !== "PASS" && attempt >= 2 &&
       !report.problems.some((problem) => problem.includes("repair limit"))) {
     report.problems.push("visual audit repair limit reached: stop automatic edits and report this case with screenshots/trace");
   }

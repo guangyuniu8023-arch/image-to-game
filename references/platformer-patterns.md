@@ -116,17 +116,19 @@ for (let i = 0; i < n; i++) {
 const ASSETS = [puppyImg, boneImg, /* ...所有素材与 UI 图 */];
 const assetsDone = () => ASSETS.filter(im => im.complete).length;  // 加载失败也 complete，走各自回退
 // 2. 初始 state = "loading"；输入处理天然拦截（loading 不在任何分支）
-// 3. 每帧在界面绘制分支里检查，全部 complete 才进标题页；否则画进度条
+// 3. 每帧在界面绘制分支里检查，全部 complete 后初始化本局并自动进入 play；否则画进度条
 if (G.state === "loading") {
   const done = assetsDone();
-  if (done >= ASSETS.length) { G.state = "title"; } 
+  if (done >= ASSETS.length) { newGame(); }
   else { /* 画 Logo + 进度条 + "加载中 done / total" */ return; }
 }
 ```
 
+`newGame()` 必须幂等地初始化首局，并在资源成功或明确失败后只调用一次。加载页不得含开始按钮；加载期间的点击/按键不得泄漏成玩法输入。
+
 ## 跑步序列帧动画
 
-2D 有左右移动的肢体角色，在项目动画决策表把 run 判为 M 动作时，可使用本平台跳跃基线（素材生产见 [assets.md](assets.md) 的“角色序列帧”）。**run 播放连续帧；其他状态不构成默认清单，只有项目生产白名单内的动作可新建真实帧；对应帧没加载好才回退到已批准 Seed**：
+2D 有左右移动的肢体角色，在项目动画决策表把 run 判为 M 动作时，可使用本平台跳跃基线（素材生产见 [assets.md](assets.md) 的“角色序列帧”）。**run 播放连续帧；其他状态不构成默认清单，只有项目生产白名单内的动作可新建真实帧；对应帧没加载好才回退到当前 Seed 并标记候选**：
 
 ```js
 const runImgs = [new Image(), new Image(), new Image(), new Image()];

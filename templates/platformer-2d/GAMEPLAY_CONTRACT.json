@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "source": "gdd-module-8",
+  "bot": "skill:run_gameplay_runtime.js",
+  "viewport": {
+    "width": 540,
+    "height": 960
+  },
+  "required_categories": [
+    "success",
+    "failure",
+    "boundary"
+  ],
+  "coverage": [
+    {
+      "category": "failure",
+      "rule": "lethal-hazard",
+      "required_sides": [
+        "enemy-contact",
+        "pit-fall"
+      ]
+    },
+    {
+      "category": "boundary",
+      "rule": "jump-gate",
+      "required_sides": [
+        "grounded",
+        "airborne"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "reach-goal",
+      "category": "success",
+      "expected": "win:goal",
+      "driver": {
+        "seed": 24051986,
+        "dt": 0.016666666666666666,
+        "max_frames": 90,
+        "setup": { "player": { "x": 9228, "y": 400, "onGround": true, "coyote": 0.09, "inv": 0 } },
+        "inputs": [
+          { "frame": 1, "action": "move-right", "phase": "press", "code": "ArrowRight" },
+          { "frame": 90, "action": "move-right", "phase": "release", "code": "ArrowRight" }
+        ]
+      }
+    },
+    {
+      "name": "enemy-contact",
+      "category": "failure",
+      "rule": "lethal-hazard",
+      "side": "enemy-contact",
+      "expected": "dead:enemy-contact",
+      "driver": {
+        "seed": 24051987,
+        "dt": 0.016666666666666666,
+        "max_frames": 1,
+        "setup": { "player": { "x": 1088, "y": 400, "onGround": true, "inv": 0 } },
+        "inputs": [
+          { "frame": 1, "action": "move-right", "phase": "press", "code": "ArrowRight" }
+        ]
+      }
+    },
+    {
+      "name": "pit-fall",
+      "category": "failure",
+      "rule": "lethal-hazard",
+      "side": "pit-fall",
+      "expected": "dead:pit-fall",
+      "driver": {
+        "seed": 24051988,
+        "dt": 0.016666666666666666,
+        "max_frames": 120,
+        "setup": { "player": { "x": 770, "y": 360, "vy": 0, "onGround": false, "coyote": 0, "inv": 0 } },
+        "inputs": [
+          { "frame": 1, "action": "jump", "phase": "press", "code": "Space" },
+          { "frame": 2, "action": "jump", "phase": "release", "code": "Space" }
+        ]
+      }
+    },
+    {
+      "name": "grounded-jump",
+      "category": "boundary",
+      "rule": "jump-gate",
+      "side": "grounded",
+      "expected": "jumped:grounded",
+      "driver": {
+        "seed": 24051989,
+        "dt": 0.016666666666666666,
+        "max_frames": 1,
+        "setup": { "probe": "jump-gate", "player": { "x": 135, "y": 400, "vy": 0, "onGround": true, "coyote": 0.09, "inv": 0 } },
+        "inputs": [
+          { "frame": 1, "action": "jump", "phase": "press", "code": "Space" }
+        ]
+      }
+    },
+    {
+      "name": "airborne-jump-ignored",
+      "category": "boundary",
+      "rule": "jump-gate",
+      "side": "airborne",
+      "expected": "ignored:airborne",
+      "driver": {
+        "seed": 24051990,
+        "dt": 0.016666666666666666,
+        "max_frames": 1,
+        "setup": { "probe": "jump-gate", "player": { "x": 135, "y": 315, "vy": 120, "onGround": false, "coyote": 0, "buffer": 0, "inv": 0 } },
+        "inputs": [
+          { "frame": 1, "action": "jump", "phase": "press", "code": "Space" }
+        ]
+      }
+    }
+  ]
+}

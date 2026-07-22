@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -13,6 +14,10 @@ from typing import Any
 
 
 CATEGORIES = {"success", "failure", "boundary"}
+
+
+def finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def sha256(path: Path) -> str:
@@ -49,6 +54,16 @@ def rel_file(project: Path, value: Any, label: str, problems: list[str]) -> Path
     return path
 
 
+def bot_file(project: Path, value: Any, problems: list[str]) -> Path | None:
+    if value == "skill:run_gameplay_runtime.js":
+        path = Path(__file__).resolve().parent / "run_gameplay_runtime.js"
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+        problems.append("skill gameplay runner is missing or empty")
+        return None
+    return rel_file(project, value, "GAMEPLAY_CONTRACT.bot", problems)
+
+
 def audit_contract(project: Path) -> tuple[dict[str, Any], list[str], Path | None]:
     problems: list[str] = []
     path = project / "GAMEPLAY_CONTRACT.json"
@@ -61,7 +76,7 @@ def audit_contract(project: Path) -> tuple[dict[str, Any], list[str], Path | Non
         problems.append("GAMEPLAY_CONTRACT.source must equal gdd-module-8")
     if not (project / "index.html").is_file() or (project / "index.html").stat().st_size <= 0:
         problems.append("project index.html is missing or empty")
-    bot_path = rel_file(project, contract.get("bot"), "GAMEPLAY_CONTRACT.bot", problems)
+    bot_path = bot_file(project, contract.get("bot"), problems)
 
     required = contract.get("required_categories")
     if not isinstance(required, list) or set(required) != CATEGORIES:
@@ -76,6 +91,7 @@ def audit_contract(project: Path) -> tuple[dict[str, Any], list[str], Path | Non
     names: set[str] = set()
     covered_categories: set[str] = set()
     covered_rule_sides: set[tuple[str, str, str]] = set()
+    grouped_outcomes: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for index, case in enumerate(cases):
         label = f"cases[{index}]"
         if not isinstance(case, dict):
@@ -93,8 +109,50 @@ def audit_contract(project: Path) -> tuple[dict[str, Any], list[str], Path | Non
             problems.append(f"{label}.category must be success, failure, or boundary")
         else:
             covered_categories.add(category)
-        if "expected" not in case:
-            problems.append(f"{label}.expected is required")
+        expected = case.get("expected")
+        if not isinstance(expected, str) or not expected.strip():
+            problems.append(f"{label}.expected must be a non-empty semantic result string")
+        driver = case.get("driver")
+        if not isinstance(driver, dict):
+            problems.append(f"{label}.driver must define runner-owned seed, fixed steps, setup, and inputs")
+        else:
+            seed = driver.get("seed")
+            if not (
+                (isinstance(seed, int) and not isinstance(seed, bool))
+                or (isinstance(seed, str) and seed.strip())
+            ):
+                problems.append(f"{label}.driver.seed must be an integer or non-empty string")
+            dt = driver.get("dt")
+            if not finite_number(dt) or not 0 < dt <= 0.1:
+                problems.append(f"{label}.driver.dt must be finite in (0, 0.1]")
+            max_frames = driver.get("max_frames")
+            if not isinstance(max_frames, int) or isinstance(max_frames, bool) or not 1 <= max_frames <= 1800:
+                problems.append(f"{label}.driver.max_frames must be an integer in [1, 1800]")
+            setup = driver.get("setup", {})
+            if not isinstance(setup, dict):
+                problems.append(f"{label}.driver.setup must be an object")
+            inputs = driver.get("inputs")
+            if not isinstance(inputs, list) or not inputs:
+                problems.append(f"{label}.driver.inputs must contain runner-dispatched browser input")
+            else:
+                for input_index, item in enumerate(inputs):
+                    input_label = f"{label}.driver.inputs[{input_index}]"
+                    if not isinstance(item, dict):
+                        problems.append(f"{input_label} must be an object")
+                        continue
+                    if not (
+                        isinstance(item.get("frame"), int)
+                        and not isinstance(item.get("frame"), bool)
+                        and isinstance(max_frames, int)
+                        and 1 <= item["frame"] <= max_frames
+                    ):
+                        problems.append(f"{input_label}.frame must stay inside fixed-step range")
+                    if not isinstance(item.get("action"), str) or not item["action"].strip():
+                        problems.append(f"{input_label}.action must be non-empty")
+                    if item.get("phase") not in {"press", "release", "pressed", "released", "down", "up", "keydown", "keyup"}:
+                        problems.append(f"{input_label}.phase must be a supported press/release phase")
+                    if item.get("code") not in {"ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Space", "KeyA", "KeyD", "KeyW", "KeyS"}:
+                        problems.append(f"{input_label}.code must be a supported browser KeyboardEvent.code")
         rule, side = case.get("rule"), case.get("side")
         if category in {"failure", "boundary"}:
             if not isinstance(rule, str) or not rule.strip():
@@ -103,6 +161,16 @@ def audit_contract(project: Path) -> tuple[dict[str, Any], list[str], Path | Non
                 problems.append(f"{label}.side is required for {category}")
             if isinstance(rule, str) and rule.strip() and isinstance(side, str) and side.strip():
                 covered_rule_sides.add((category, rule.strip(), side.strip()))
+                if isinstance(expected, str) and expected.strip():
+                    grouped_outcomes.setdefault((category, rule.strip()), []).append((side.strip(), expected.strip()))
+    for (category, rule), outcomes in grouped_outcomes.items():
+        sides = {side for side, _ in outcomes}
+        expected_values = [expected for _, expected in outcomes]
+        if len(sides) > 1 and len(expected_values) != len(set(expected_values)):
+            problems.append(
+                f"{category}/{rule} has multiple sides but repeated expected values; "
+                "each side must expose a distinct semantic outcome"
+            )
     if covered_categories != CATEGORIES:
         problems.append("cases must cover success, failure, and boundary")
 
@@ -150,6 +218,8 @@ def audit(project: Path, report_path: Path | None, contract_only: bool = False) 
         problems.append("gameplay report version must equal 1")
     if report.get("status") != "PASS":
         problems.append("gameplay report status must equal PASS")
+    if report.get("driver_protocol") != "runner-controlled-v1":
+        problems.append("gameplay report must use runner-controlled-v1")
     expected_hashes = {
         "contract_sha256": sha256(project / "GAMEPLAY_CONTRACT.json"),
         "index_sha256": sha256(project / "index.html"),
@@ -181,6 +251,10 @@ def audit(project: Path, report_path: Path | None, contract_only: bool = False) 
                 problems.append(f"case {expected_case['name']} {key} does not match contract")
         if actual.get("pass") is not True:
             problems.append(f"case {expected_case['name']} did not pass")
+        if actual.get("driver_protocol") != "runner-controlled-v1":
+            problems.append(f"case {expected_case['name']} must be runner-controlled-v1")
+        if actual.get("input_source") != "chromium-cdp":
+            problems.append(f"case {expected_case['name']} must record chromium-cdp input source")
         if "actual" not in actual:
             problems.append(f"case {expected_case['name']} must record actual result")
         elif actual.get("actual") != expected_case.get("expected"):
@@ -188,6 +262,60 @@ def audit(project: Path, report_path: Path | None, contract_only: bool = False) 
         trace = actual.get("trace")
         if not isinstance(trace, list) or len(trace) < 2:
             problems.append(f"case {expected_case['name']} must include at least two real trace samples")
+        else:
+            previous_frame = -1
+            for index, sample in enumerate(trace):
+                label = f"case {expected_case['name']} trace[{index}]"
+                if not isinstance(sample, dict):
+                    problems.append(f"{label} must be an object")
+                    continue
+                frame = sample.get("frame")
+                if not isinstance(frame, int) or isinstance(frame, bool) or frame <= previous_frame:
+                    problems.append(f"{label}.frame must be a strictly increasing non-negative integer")
+                else:
+                    previous_frame = frame
+                if not isinstance(sample.get("state"), str) or not sample["state"].strip():
+                    problems.append(f"{label}.state must be a non-empty string")
+                position = sample.get("position")
+                coords = [key for key in ("x", "y", "z") if isinstance(position, dict) and key in position]
+                if not coords or not all(finite_number(position[key]) for key in coords):
+                    problems.append(f"{label}.position must contain finite x/y/z evidence")
+        seed = actual.get("seed")
+        if not (
+            (isinstance(seed, int) and not isinstance(seed, bool))
+            or (isinstance(seed, str) and seed.strip())
+        ):
+            problems.append(f"case {expected_case['name']} must record a deterministic seed")
+        dt = actual.get("dt")
+        if not finite_number(dt) or not 0 < dt <= 0.1:
+            problems.append(f"case {expected_case['name']} dt must be finite in (0, 0.1]")
+        inputs = actual.get("inputs")
+        if not isinstance(inputs, list) or not inputs:
+            problems.append(f"case {expected_case['name']} must record semantic inputs")
+        else:
+            for index, item in enumerate(inputs):
+                if not (
+                    isinstance(item, dict)
+                    and isinstance(item.get("frame"), int)
+                    and not isinstance(item.get("frame"), bool)
+                    and item["frame"] >= 0
+                    and isinstance(item.get("action"), str)
+                    and item["action"].strip()
+                    and isinstance(item.get("phase"), str)
+                    and item["phase"].strip()
+                ):
+                    problems.append(
+                        f"case {expected_case['name']} inputs[{index}] must record frame/action/phase"
+                    )
+        terminal = actual.get("terminal")
+        if not (
+            isinstance(terminal, dict)
+            and isinstance(terminal.get("state"), str)
+            and terminal["state"].strip()
+            and isinstance(terminal.get("reason"), str)
+            and terminal["reason"].strip()
+        ):
+            problems.append(f"case {expected_case['name']} must record terminal state and reason")
         assertions = actual.get("assertions")
         if not isinstance(assertions, list) or not assertions or not all(
             isinstance(item, str) and item.strip() for item in assertions
@@ -213,21 +341,51 @@ def self_test() -> int:
             ],
             "cases": [
                 {"name": "success", "category": "success", "expected": "ready"},
-                {"name": "short", "category": "failure", "rule": "strength", "side": "short", "expected": "gameover"},
-                {"name": "long", "category": "failure", "rule": "strength", "side": "long", "expected": "gameover"},
+                {"name": "short", "category": "failure", "rule": "strength", "side": "short", "expected": "gameover:short"},
+                {"name": "long", "category": "failure", "rule": "strength", "side": "long", "expected": "gameover:long"},
                 {"name": "inside", "category": "boundary", "rule": "hitbox", "side": "inside", "expected": "ready"},
                 {"name": "outside", "category": "boundary", "rule": "hitbox", "side": "outside", "expected": "gameover"},
             ],
         }
+        for item in contract["cases"]:
+            item["driver"] = {
+                "seed": 4242,
+                "dt": 1 / 60,
+                "max_frames": 6,
+                "setup": {},
+                "inputs": [
+                    {"frame": 1, "action": "jump", "phase": "press", "code": "Space"},
+                    {"frame": 2, "action": "jump", "phase": "release", "code": "Space"},
+                ],
+            }
         cp = project / "GAMEPLAY_CONTRACT.json"
         cp.write_text(json.dumps(contract), encoding="utf-8")
+        def evidence(item: dict[str, Any]) -> dict[str, Any]:
+            return {
+                **item,
+                "actual": item["expected"],
+                "pass": True,
+                "seed": 4242,
+                "dt": 1 / 60,
+                "inputs": [
+                    {"frame": 0, "action": "jump", "phase": "press"},
+                    {"frame": 6, "action": "jump", "phase": "release"},
+                ],
+                "trace": [
+                    {"frame": 0, "state": "start", "position": {"x": 0, "y": 0}},
+                    {"frame": 7, "state": item["expected"], "position": {"x": 64, "y": 0}},
+                ],
+                "terminal": {"state": item["expected"], "reason": "fixture rule result"},
+                "assertions": ["actual terminal state equals expected"],
+                "driver_protocol": "runner-controlled-v1",
+                "input_source": "chromium-cdp",
+            }
         cases = []
         for item in contract["cases"]:
-            cases.append({**item, "actual": item["expected"], "pass": True,
-                          "trace": [{"state": "start"}, {"state": item["expected"]}],
-                          "assertions": ["actual terminal state equals expected"]})
+            cases.append(evidence(item))
         report = {
-            "version": 1, "status": "PASS", "contract_sha256": sha256(cp),
+            "version": 1, "status": "PASS", "driver_protocol": "runner-controlled-v1",
+            "contract_sha256": sha256(cp),
             "index_sha256": sha256(project / "index.html"), "bot_sha256": sha256(bot),
             "cases": cases,
         }
@@ -245,16 +403,19 @@ def self_test() -> int:
         single_contract["cases"].append({
             "name": "time-up", "category": "failure", "rule": "timer",
             "side": "time_up", "expected": "gameover",
+            "driver": {
+                "seed": 4242, "dt": 1 / 60, "max_frames": 6, "setup": {},
+                "inputs": [
+                    {"frame": 1, "action": "wait", "phase": "press", "code": "Space"},
+                    {"frame": 2, "action": "wait", "phase": "release", "code": "Space"},
+                ],
+            },
         })
         cp.write_text(json.dumps(single_contract), encoding="utf-8")
-        single_cases = [
-            {**item, "actual": item["expected"], "pass": True,
-             "trace": [{"state": "start"}, {"state": item["expected"]}],
-             "assertions": ["actual terminal state equals expected"]}
-            for item in single_contract["cases"]
-        ]
+        single_cases = [evidence(item) for item in single_contract["cases"]]
         single_report = {
-            "version": 1, "status": "PASS", "contract_sha256": sha256(cp),
+            "version": 1, "status": "PASS", "driver_protocol": "runner-controlled-v1",
+            "contract_sha256": sha256(cp),
             "index_sha256": sha256(project / "index.html"), "bot_sha256": sha256(bot),
             "cases": single_cases,
         }
@@ -282,7 +443,28 @@ def self_test() -> int:
         wrong_actual_report["cases"][0]["actual"] = "gameover"
         rp.write_text(json.dumps(wrong_actual_report), encoding="utf-8")
         wrong_actual = any("actual result does not equal expected" in problem for problem in audit(project, rp))
-    if good and single_side and empty_rejected and missing_side and missing_case and wrong_actual:
+        fake_hook_report = json.loads(json.dumps(report))
+        for item in fake_hook_report["cases"]:
+            item.pop("seed", None)
+            item.pop("dt", None)
+            item.pop("inputs", None)
+            item.pop("terminal", None)
+            item["trace"] = [{"state": "start"}, {"state": item["expected"]}]
+        rp.write_text(json.dumps(fake_hook_report), encoding="utf-8")
+        fake_hook_rejected = any(
+            "deterministic seed" in problem or "semantic inputs" in problem
+            for problem in audit(project, rp)
+        )
+        duplicate_contract = json.loads(json.dumps(contract))
+        duplicate_contract["cases"][1]["expected"] = "gameover"
+        duplicate_contract["cases"][2]["expected"] = "gameover"
+        cp.write_text(json.dumps(duplicate_contract), encoding="utf-8")
+        duplicate_outcome = any(
+            "repeated expected values" in problem
+            for problem in audit(project, rp, contract_only=True)
+        )
+    if (good and single_side and empty_rejected and missing_side and missing_case and
+            wrong_actual and fake_hook_rejected and duplicate_outcome):
         print("GAMEPLAY_REPORT_SELFTEST: PASS")
         return 0
     print("GAMEPLAY_REPORT_SELFTEST: FAIL")

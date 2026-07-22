@@ -1,112 +1,72 @@
 ---
 name: image-to-game
-description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并支持后续迭代与换皮。图片主体承担操作、驱动或解说职责；按通用 GDD 策略先完成玩法、素材、Sprite、HUD 和验收设计，再用 AI、Canvas 或混合方式生产。已有类型包：2D 平台跳跃、3D 跑酷、消消乐、竖版弹跳；新类型走通用推演。当用户要求“做个小游戏 / 平台跳跃 / 跑酷 / 消消乐 / 弹跳 / 3D 游戏”，或要修改、修 bug、换素材、换主题、加功能时使用。涵盖图片分析、项目 GDD、素材与 UI 生产、Canvas/three.js 实现、资源加载门、类型化机器人验证、竖屏布局和版本交付。
+description: 把用户提供的图片变成可玩的 HTML5 网页小游戏，并支持后续迭代与换皮。先用轻量 GDD 明确玩法、角色职责、镜头、素材与必要动画，再生成素材和游戏；始终保留可玩候选，限时验证并把未通过项与 HTML 一并交付。已有类型包：2D 平台跳跃、3D 跑酷、消消乐、竖版弹跳；新类型走通用推演。当用户要求“做个小游戏 / 平台跳跃 / 跑酷 / 消消乐 / 弹跳 / 3D 游戏”，或要修改、修 bug、换素材、换主题、加功能时使用。
 ---
 
 # Image to Game
 
-把用户图片变成可玩的网页小游戏，并支持持续迭代。先判断走哪条工作流：
+把用户图片变成可玩的网页小游戏。先判断工作流：新游戏走 0-1；已有游戏走迭代；命中现有模板走模板换皮。
 
-- **用户给了图、要新游戏** → 工作流一（0-1 创建）；若请求类型与已有模板一致 → 工作流三（模板换皮，更快）
-- **已有游戏、要改东西** → 工作流二（1-N 迭代）
+## 核心原则
 
-## 通用原则（任何情况都遵守）
+1. **GDD 先于素材**：先保存项目 `GDD.md`，明确核心循环、输入、成功/失败、角色职责、镜头、HUD、素材清单、动画最小充分集和验证方式，再调用生图工具。GDD 指导生产，但不设置审批许可证。
+2. **单线生成，候选必交付**：按 GDD → 骨架 → 素材 → 完整游戏 → 限时验证 → 交付执行。GDD 写完后的第一个实现检查点必须是可启动的 `index.html`；在首次网络生图前保存加载页、自动开局、核心输入、成功/失败状态机和程序化回退。`index.html` 一旦可启动就作为持久候选保存；后续审计失败、超时或元数据错误不得删除、隐藏或拒绝返回该候选。
+3. **只让致命运行错误阻止“可玩”声明**：HTML 无法加载、启动即抛异常、没有可操作入口或核心输入完全失效时，标记 `INCOMPLETE`；仍返回现有文件和诊断。玩法、视觉、合同、证据或 Sprite 检查失败时标记 `GAME_CANDIDATE`，返回链接与未通过项，不冒充 `GAME_READY`。
+4. **验证有硬时间预算，不允许机器人主导生产循环**：`GAMEPLAY_CONTRACT.json` 保存固定 seed、`dt`、初始场景和输入时间表；项目只暴露 `window.__game.gameplayAudit.reset/step/snapshot`。通用 `scripts/run_gameplay_runtime.js` 在真实 Chromium 中通过 CDP 发送键盘输入、固定步进并自己采样 trace；游戏不会收到 case 名或 expected，不能一次性自报验收结果。再由 `scripts/audit_gameplay_report.py` 核对哈希与覆盖；不得为每个项目临时造 VM/DOM/Image 浏览器替身。合同只写正式输入可达的规则，同一规则的多个失败侧必须返回不同语义结果，不能都用 `OVER` 冒充。外层仍用 `scripts/run_bot_guard.js`；简单 H5 默认一次主验证，只有明确根因时允许一次定向修复和一次复测。达到预算立即停止验证并交付当前候选。
+5. **参考角色必须实际调用生图工具**：用户提供可识别角色图且角色承担操作主体或主体驱动者时，先完成 GDD，再把上传图作为 reference 生成正式游戏内角色 Seed。`CHARACTER_PRODUCTION.json` 只做生成后的记录，不是调用 Seedream 的前置许可证；缺失或 schema 错误只能产生诊断，不能阻止生图或交付。API 失败应报告并保留明确标注的程序化回退候选，不得谎称正式角色已完成。
+6. **Sprite 保留 Game Studio 的一致性流程**：GDD 只选择必要动作。连续标量若已由 HUD、形变或特效清楚表达，不再为同一信息生成动作条；简单 H5 首个候选通常只生产一个真正改变身体轮廓/物理事件的核心动作，第二个动作必须单独证明信息增量与姿态必要性。先得到游戏内 Seed；每个必要动作必须按 `build_sprite_edit_canvas.py` → 把输出画布作为生图 reference 一次生成整条 → `normalize_sprite_strip.py --lock-frame1` → `render_sprite_preview_sheet.py` 的顺序执行，禁止逐帧抽卡或跳过编辑画布。全帧共享比例和 bottom-center root anchor，再在游戏内预览。Sprite 检查失败不吞掉已有游戏。
+7. **镜头由需求推导**：按 [references/visual-framing.md](references/visual-framing.md) 分析玩家判断、必须共同可见对象、精确输入的稳定参考系、目标变化事件和 HUD 安全区。不得让用户选择镜头表单，也不得按游戏类型套固定镜头。自然启动在资源就绪后必须直接呈现首个可玩构图；需要跟随时必须检查连续游玩后的真实镜头移动。
+8. **资源加载门和竖屏布局必须保留**：游戏舞台锁定 9:16；自然启动只显示轻量加载页，图片与字体全部成功或明确失败后初始化本局、设置 `window.__game.ready = true` 并自动进入可玩状态。加载失败走程序化回退；默认不生成封面资产、不显示标题页或“开始游戏”按钮，也不要求第二次点击。
+9. **审计是诊断，不是生产授权**：`GAMEPLAY_CONTRACT.json`、`VISUAL_CONTRACT.json`、角色记录、运行时报告和交付 manifest 可用于定位问题与复现，但任何 schema 或报告 FAIL 都不得阻止后续素材生成，也不得阻止返回现有 HTML。
+10. **每轮结束都交付、快照、备份**：交付目录必须持久且用户可访问，`index.html` 在项目根；同时保存源码、素材、GDD、验证报告和仍未解决的问题。
 
-1. 不用游戏引擎：单个 `index.html` + 素材文件，原生 Canvas + JavaScript；3D 类型可用本地 three.js。
-2. 一切图片素材带程序化回退：加载失败自动改用代码绘制，游戏永不白屏（注入模式见 [references/assets.md](references/assets.md)）。
-3. 玩法正确性靠**类型对应的机器人 + 机器可审计证据**验证，不靠肉眼或单个 `PASS` 日志；机器人、通过条件和完整性断言由类型包或项目 GDD 模块 8 指定，并写入 `GAMEPLAY_CONTRACT.json`。GDD 声明的每个成功、失败和边界 case 都必须有真实 trace；单侧规则测一侧，多侧规则必须覆盖全部已声明侧，用 `scripts/audit_gameplay_report.py` 硬审计。
-4. 视觉验收必须覆盖项目 GDD 和 `VISUAL_CONTRACT.json` 推导的关键状态；第一个 case 必须从页面自然启动状态只读采样，不能由测试入口强制切到标题页。有类型截图适配器就同步快进，没有则为项目建立确定性测试入口，不靠“等几秒再截”。构图预览必须由正式舞台、投影、HUD 和相机骨架实时渲染，禁止手工拼图冒充运行时预览。
-5. 每轮结束三件事：**交付 → 快照 → 备份**。意图固定，路径与工具随环境替换（见"环境适配"一节）：交付 = 成果放进**持久且用户可访问**的目录（每个项目独立子目录，`index.html` 在根）；快照 = 环境有版本工具就调用；备份 = 源码复制到持久工作区，不能只留在临时目录。
-6. **所有游戏竖屏锁定**：游戏区永远是手机竖屏比例，横屏窗口时居中显示 9:16 舞台、两侧留边，不做横屏布局（实现见各类型包）。
-7. **Sprite 遵循动画最小充分集**：玩家动词、角色职责和事件只产生候选，不是默认状态清单。候选动作必须通过归属、信息增量、姿态必要性和节奏收益四道门，才能进入 Sprite Contract 与生产白名单；不确定时默认不生产新动作。已入选的机制动作禁止用原立绘平移、缩放或染色冒充；次级反馈优先复用现有姿态、UI 或程序化表现。设计与生产见 [references/gdd-strategy.md](references/gdd-strategy.md) 与 [references/assets.md](references/assets.md)。
-8. **参考角色生图是硬门，不是自由选项**：用户提供可识别角色图且角色承担 A 操作主体或 B 主体驱动者时，正式主角必须用当前环境的图片生成/编辑工具，且必须把上传图作为 reference。Canvas 只可做碰撞/调试/加载失败回退和非角色几何，不能冒充正式主角；只有用户明确要求“纯代码/不调用 AI”才能例外并留证。生图工具失败时按工具建议重试，仍失败就报告阻塞，禁止静默降级。生产前后分别运行 `scripts/audit_character_production.py` 的 Seed/production 门。
-9. **必须有资源加载门**：素材全部 `complete` 前不开局（显示加载进度），加载失败也照常放行（走各自的代码回退），绝不白屏也绝不占位圈开局；**字体也在门内**（`document.fonts.load` 完成后放行，失败兜底不卡门），否则首帧会按过渡字体定格错位。UI 的 AI、代码或混合生产方式由 GDD 决定，文字、数字和动态状态始终由代码绘制，详见 [references/ui-kit.md](references/ui-kit.md)。
-10. **项目 GDD 决定“做什么、为什么”，reference 决定“怎样推导、怎样执行”**：所有 0-1 项目都按 [references/gdd-strategy.md](references/gdd-strategy.md) 生成并保存 `<项目目录>/GDD.md`；模块是覆盖要求，不是固定模板。素材生产记录写入 `<项目目录>/ASSET_LEDGER.md`，不塞进类型包。
-11. **设计和生产分门调用**：[references/assets.md](references/assets.md) 与 [references/ui-kit.md](references/ui-kit.md) 的“设计参考区”可在 GDD 阶段读取；只有 GDD 通过一致性门后，才能进入各自的“生产执行区”。禁止先批量生产再反推玩法和界面。
-12. **镜头策略由本次需求推导，不由表单或类型名决定**：读取 [references/visual-framing.md](references/visual-framing.md)，分析玩家决策、必须共同可见对象、参考系敏感状态、目标变化事件和 HUD 安全区，再组合跟随、目标组、前视、锁定、死区、阻尼或分区能力。类型包只提供能力，不得包含“游戏类型 → 固定镜头”的路由。把理由和运行时断言写入 `VISUAL_CONTRACT.json`，用静态合同门与浏览器轨迹门验证。
-13. **正式素材回退只保可运行，不算验收通过**：视觉 probe 必须报告主实体真实 `render_source`；Production case 不得接受 `fallback`。交付包必须带 `game-build` 元信息和 `DELIVERY_MANIFEST.json`，用 `scripts/audit_delivery_bundle.py` 对照源码与全部运行时 Sprite 哈希，公网链接再核对 build id 后才能返回用户。
-14. **阶段由控制器授权，不由执行模型自推进**：按 [references/pipeline-gates.md](references/pipeline-gates.md) 依次经过 design、seed、production。若存在只读 `/etc/pi/pipeline-controller.json`，执行模型只产出候选文件并以 `DESIGN_READY`、`SEED_READY` 或 `PRODUCTION_READY` 结束，不得自行调用 `audit_pipeline_stage.py` 或 `audit_visual_runtime.js`；外层控制器在模型进程退出后独立运行 Gate 并决定是否晋级。没有外层控制器的环境才由当前 Agent 运行相同 Gate。当前阶段失败时操作意图切换为诊断：保留稳定 `failure_signature`，只验证一个根因假设；相同 signature 再现或预算耗尽就以目标未完成状态停止当前阶段。不得换 run id、报告路径或环境变量重置 Gate。
-15. **镜头过渡形态也是需求断言**：每个重新取景 case 根据玩家感知、空间连续性和下一决策时机推导 `transition_mode: smooth|cut` 与理由，不由表单或类型名决定。`smooth` 必须保留真实中间帧、首帧未收敛且目标稳定；`cut` 必须首帧已稳定。不得用相机瞬移替代 GDD 声明的平滑跟随。
+## 工作流一：0-1 创建
 
-## 工作流一：0-1 创建（八步）
+1. **分析图片与需求**：确认图片主体、玩法类型和角色职责。用户已指明类型就直接做；只说“做个小游戏”才一次性询问类型。未附图时先索要图片。
+2. **写轻量 GDD**：读取 [references/gdd-strategy.md](references/gdd-strategy.md) 与对应类型包；新类型再读 [references/new-type.md](references/new-type.md)。保存核心循环、规则红线、加载页与自动开局、镜头理由、素材清单、动画决策表和验证用例。每个失败用例都必须能由正式输入到达；输入维度不足时先修正操作设计，不在机器人中伪造失败。不要在这一阶段生图，也不要为合同格式反复返工。
+3. **建立可玩骨架**：命中模板就复制模板，否则建立单个 `index.html` 的最小完整状态机。先实现正式舞台、输入、成功/失败、加载页、自动开局、HUD、投影和镜头；代码角色只作为暂时回退。加载期间不得接受玩法输入；资源全部成功或明确失败后初始化本局并直接进入首个可玩状态，不插入标题页或开始按钮。骨架可启动后立即保存候选，暴露 `window.__game.ready`、`visualAudit` 和 `gameplayAudit.reset/step/snapshot`；首次生图前不得把工作区停留在只有文档的状态。用 `scripts/scaffold_gameplay_contract.py --project . --bot skill:run_gameplay_runtime.js --success NAME=EXPECTED --failure RULE:SIDE:NAME=EXPECTED --boundary RULE:SIDE:NAME=EXPECTED` 生成结构正确的合同，再按 GDD 为每个 case 填入 runner 拥有的 `driver.seed/dt/max_frames/setup/inputs`；同类参数通过重复 flag 添加，不手写另一套 schema。
+4. **按 GDD 生产素材**：参考角色直接用上传图生成游戏内 Seed；背景、平台、棋子、UI 底材按 GDD 需要生产。必要角色动作使用 Seed → 整条 → 归一化 → 预览流程，不生成 GDD 未选择的动作。把结果写入 `ASSET_LEDGER.md`；角色记录可在生成后补写。
+5. **完成游戏**：接入正式素材和资源加载门，完成全部核心规则、加载完成自动开局、镜头跟随、反馈与重开。除非用户明确要求，禁止新增封面图、标题页或开局 CTA。素材失败时保留回退并在交付报告标记，不得中止已有可玩版本。
+6. **限时验证**：按 [references/verification.md](references/verification.md) 运行语法、一次成功路径、GDD 声明的失败/边界、自然启动、真实输入、角色 render source、镜头与控制台检查。简单 H5 一轮验证总预算以控制器为准；只允许一次定向修复复测。
+7. **无条件返回当前结果**：通过核心检查时报告 `GAME_READY`；仍有问题时报告 `GAME_CANDIDATE` 或 `INCOMPLETE`。三种状态都必须返回项目路径、可打开的 `index.html`（若已存在）、已完成内容、失败项和耗时。
 
-1. **分析图片与需求**：查看图片，按 assets.md“阶段 A：GDD 设计参考”记录事实特征，把玩法实体先记为假设，不生成正式素材。**图片是硬门槛：用户未附图就先索要，拿到图再开工**。**类型判断（询问门）**：
-   - 用户已指明类型（"超级玛丽式""类似 XX""XX 那样的"）→ 不问，直接做；
-   - 只说"做个小游戏"没提类型 → 用 ask_user **一次性**问清：游戏类型为主（选项结合图片主题给 2-4 个具体的，如"横版闯关（类似超级玛丽）/ 3D 跑酷（类似地铁跑酷）"，标注推荐项），最多再加一个难度/受众问题；
-   - 得到答复前不开工；严禁分多轮连环追问。
-2. **选择设计依据**：已有类型读取 [references/gdd-strategy.md](references/gdd-strategy.md) + 对应类型包；没有类型包时再读取 [references/new-type.md](references/new-type.md) 做基线考据和红线推演。
-3. **保存项目设计与双合同**：在项目根写 `GDD.md`，覆盖八模块决策及来源；用 `scripts/scaffold_gameplay_contract.py` 把 GDD 模块 8 推导出的成功、失败侧和边界写成结构正确的 `GAMEPLAY_CONTRACT.json`；按 visual-framing.md 从本次需求生成 `VISUAL_CONTRACT.json`，记录推理、组合策略、自然启动封面、真实渲染来源和关键状态断言，并用 `scripts/audit_visual_contract.py` 执行静态结构门。合同必须写目标 `viewport`，每个实体必须声明 `space: world|hud`，当前阶段 `artifacts` 只能列出已存在文件，不能预填未来动作素材。参考角色硬门适用时同时创建 `CHARACTER_PRODUCTION.json` version 2 draft：正式输出路径先声明但不得复制上传图占位，`actions` 必须为空、approval pending。外层控制器不存在时运行 `python3 scripts/audit_pipeline_stage.py --project <项目目录> --stage design --require-character-draft`；存在控制器时只报告 `DESIGN_READY`，由控制器运行该命令。该 Gate 不只做静态检查，还以 design phase 在真实浏览器执行全部 `runCase`：允许主角使用 debug/fallback 几何，但 probe 实体、相机字段、状态、帧数、目标变化与合同必须完整一致；PASS 前不得调用任何生图工具。
-4. **通过设计门**：逐项检查玩法—角色—素材—Sprite—HUD—验证闭环；GDD 模块 6 必须先产出动画决策表，再把通过必要性门的动作写入 Sprite Contract 和生产白名单。逐状态确认玩家判断、必须可见对象和镜头行为已进入视觉合同；未闭合就回到对应模块，禁止进入生产。
-5. **先建构图骨架，再做 Seed 审批（两段式硬停）**：先实现正式舞台尺寸、投影、相机更新、HUD 安全区、必要状态片段、`window.__game.ready`（资源加载门完成后才为 `true`）、只读 `window.__game.visualAudit.snapshot` 和确定性 `window.__game.visualAudit.runCase`；自然启动必须真实停在标题/封面，重新取景 case 必须有触发紧前 probe、从触发后第一帧开始的 samples、非零 target/镜头位移和需求轴断言；不得混入触发前帧或伪造 `cameraSettled` 状态。此时角色可用调试几何，并先让 design Gate PASS。只有控制器进入 seed 后，才只用 manifest 中的上传图 reference 和目标路径生成游戏内 Seed Frame；Pi 适配器会在 API 请求前机械检查阶段授权、design Gate、已有占位文件、manifest 目标与 reference 绑定。把 Seed 接入真实骨架生成构图预览；白名单动作节拍预览只能用 Seed 加箭头、轮廓框、文字节拍或代码变换做**规划示意**，不能调用生图工具生成新姿态。外层控制器不存在时运行 `python3 scripts/audit_pipeline_stage.py --project <项目目录> --stage seed`；存在控制器时只报告 `SEED_READY`，由控制器运行该命令。Gate 内部运行 `audit_visual_runtime.js` 和角色 Seed 门；全部 PASS 后交付 Seed/构图/节拍预览并**结束当前执行，等待明确批准**。未批准禁止任何动作生图调用、raw/strip/frames 产物、完整状态实现或完成声明。
-6. **生产素材、UI 并完成实现**：用户批准后，只对生产白名单整条生成、统一归一化和预览，再用类型注册表完成游戏。生产阶段不得自行补齐动作。每件素材在 `ASSET_LEDGER.md` 记录职责、文件、生产方式、prompt/配方、批准证据、日期和状态；输入统一走 [references/controls.md](references/controls.md)。正式角色入引擎后运行 `audit_character_production.py --phase production`。
-7. **玩法与视觉双验证**：按 [references/verification.md](references/verification.md) 调用注册机器人和截图方案；简单单循环 H5 默认走其中的**快速验证档**。所有项目机器人通过 `scripts/run_bot_guard.js` 加进程级超时，输出 `evidence/gameplay-audit.json`。存在外层控制器时模型只报告 `PRODUCTION_READY`，由控制器运行 `python3 scripts/audit_pipeline_stage.py --project <项目目录> --stage production`；否则由当前 Agent 运行同一命令。Gate 统一检查机器人证据、正式视觉、角色生产和批准基线。失败按报告责任层修改，不降低验收口径；相同 `failure_signature` 再现时停止盲修。
-8. **交付**：交付 `index.html`、素材、GDD、ledger、双合同和验证证据；发布目录加入 `game-build` 与 `DELIVERY_MANIFEST.json`，先通过 `audit_delivery_bundle.py`，公网地址再核对同一 build id 和自然启动，最后按通用原则第 5 条留快照与备份。
+## 工作流二：1-N 迭代
 
-## 工作流二：1-N 迭代（修 bug / 调手感 / 换素材）
+恢复项目与 GDD，判定受影响模块，做最小修改；只重跑受影响的机器人/截图 case。每轮都产生新的可回退候选，不因回归失败隐藏上一版。详见 [references/iteration.md](references/iteration.md)。
 
-按 [references/iteration.md](references/iteration.md)：恢复项目与 GDD → 判定受影响模块 → 先更新设计决策或 ledger → 最小修改 → 类型机器人+截图回归 → 存新版本。
+## 工作流三：模板换皮
 
-## 工作流三：模板换皮（类型匹配模板时的快速路径）
-
-请求的类型与已有模板一致、且 `templates/` 目录存在时（见类型包一节的获取说明），克隆模板换皮，不从零构建：
-
-1. **复制模板**：`templates/<类型>/` 复制为新项目目录。
-2. **生成差异 GDD**：保存项目 `GDD.md`，明确继承的玩法/物理/关卡/验证，以及重新推导的角色职责、主题、素材、Sprite 和 HUD 皮肤。换皮不重写不变的基线。
-3. **换主题素材并重推视觉合同**（只继承已声明不变的玩法代码）：按所选模板的素材接口、对应类型包和项目 GDD 生产白名单逐项生产；不得仅按“2D / 3D”套用统一动作或素材清单。换皮会改变 Sprite 透明像素框、视觉重量和 HUD 避让，因此必须按 visual-framing.md 从当前素材与需求重推 `VISUAL_CONTRACT.json` 并跑视觉双门，不能直接继承旧构图数值。若模板必需动作未进入当前项目白名单，判定模板不匹配并改走工作流一，不得为凑模板接口新增动作。文件名与模板保持一致，并写 `ASSET_LEDGER.md`。参考图主角身份或姿态体系变更时同样应用参考角色生图硬门、`CHARACTER_PRODUCTION.json` version 2 和 Seed Frame 运行时批准；只替换已批准同身份的色变体可不停顿。
-   - `platformer-2d` 模板：保留现有主角与跑步帧 ×4（A→B→C→A）、收集物、敌人、终点、障碍、背景和地形砖接口。
-   - `runner-3d` 模板：保留标题图、收集物和天空图接口；程序化角色只改对应类型包允许的配色/特征参数。
-   - 新增模板：先在对应类型包写清模板素材接口、可继承动作和替换边界，再接入本工作流；契约未完成时走工作流一。
-4. **改主题令牌**：游戏名、标题文案和 UI 设计令牌；按 ui-kit.md 生产执行区集成。
-5. **不能动**：差异 GDD 标为继承的物理基线、关卡/刷怪红线、加载门、竖屏锁定和机器人。
-6. **验证与交付**：使用该模板所属类型的机器人和截图方案，交付物与 0-1 相同。
+请求类型与 `templates/<类型>/` 匹配时复制模板，先写差异 GDD，再只替换当前 GDD 需要的素材与主题令牌。玩法、输入、资源加载门和已验证物理基线默认继承；角色身份或动作体系变化时仍走 reference Seed 和整条 Sprite 流程。换皮后的验证失败应返回候选和报告，不得回退成从零重写。
 
 ## 类型注册表
 
-类型包只提供已验证基线和类型差异，不能代替项目 GDD。
-
-| 类型 | 设计/实现 reference | 机器人 | 截图方案 |
+| 类型 | 设计/实现 reference | 真实浏览器主验证 | 可选逻辑快测 |
 |---|---|---|---|
-| 2D 平台跳跃 | [platformer-2d.md](references/platformer-2d.md) + [platformer-patterns.md](references/platformer-patterns.md) | `scripts/bot_platformer.js` | `scripts/make_ff_platformer_pages.py` |
-| 3D 跑酷 | [runner-3d.md](references/runner-3d.md) | `scripts/runner_bot.js` | 类型包验证节 |
-| 消消乐 | [match3.md](references/match3.md) | `scripts/bot_match3.js` | 类型包验证节 |
-| 竖版弹跳 | [doodle-jump.md](references/doodle-jump.md) | `scripts/bot_doodle.js` | 类型包验证节 |
-| 新类型 | [gdd-strategy.md](references/gdd-strategy.md) + [new-type.md](references/new-type.md) | 项目适配 | 项目 GDD 模块 8 |
+| 2D 平台跳跃 | [platformer-2d.md](references/platformer-2d.md) + [platformer-patterns.md](references/platformer-patterns.md) | `scripts/run_gameplay_runtime.js` + 项目合同 | `scripts/bot_platformer.js` |
+| 3D 跑酷 | [runner-3d.md](references/runner-3d.md) | `scripts/run_gameplay_runtime.js` + 项目合同 | `scripts/runner_bot.js` |
+| 消消乐 | [match3.md](references/match3.md) | `scripts/run_gameplay_runtime.js` + 项目合同 | `scripts/bot_match3.js` |
+| 竖版弹跳 | [doodle-jump.md](references/doodle-jump.md) | `scripts/run_gameplay_runtime.js` + 项目合同 | `scripts/bot_doodle.js` |
+| 新类型 | [gdd-strategy.md](references/gdd-strategy.md) + [new-type.md](references/new-type.md) | `scripts/run_gameplay_runtime.js` + 项目合同 | GDD 明确声明的可选快测 |
 
-新增类型经实战验证和用户验收后，才把八模块中的稳定差异、实现模式、机器人和截图策略固化成新类型包。
+新增类型只有在游戏已交付、机器人证据通过且用户验收后，才固化成类型包或模板。
 
-两个已验证类型另有**完整可运行的参考实现**（汪汪主题，可直接换皮）：`templates/platformer-2d/`、`templates/runner-3d/`。模板体积大**不随 .skill 包分发**，与本 skill 同仓库获取。**若 skill 旁没有 templates/ 目录**（单独安装的包），说明无模板可用——直接走工作流一，类型包已含全部构建基线，不依赖模板。
+## Pi 沙盒执行约定
 
-## 环境适配（换 Agent / 换环境时替换这三处）
+- `/etc/pi/pipeline-controller.json` 只提供任务身份、超时和修复计数；旧的 `design/seed/production` 字段仅作兼容与日志记录，不再是素材能力边界。
+- 任何阶段只要项目已有 `GDD.md`，就可以按 GDD 调用图片工具；参考角色调用必须带上传图 reference。
+- 执行模型完成整条任务后返回 `GAME_READY`；预算耗尽或仍有问题时返回 `GAME_CANDIDATE`/`INCOMPLETE` 和现有候选路径。
+- 不得自行调用权威审计形成循环。可运行一次必要静态检查和一次受看门狗保护的主机器人；明确修复后最多复测一次。
+- 超时、工具失败或审计失败时保留工作区，不删除已有 `index.html`、素材和证据。
 
-skill 只有三处依赖具体环境。**意图不变，实现可换**——下表"本环境实现"列只是示例：
+## 常见坑
 
-| 项 | 不变的意图 | 本环境实现（示例） | 其他环境怎么换 |
-|---|---|---|---|
-| AI 生图 | 为 GDD 指定的 AI 素材提供原图参考、编辑一致性与透明底/比例约束 | 环境内置的图片生成/编辑工具 | 换成当前环境可用的生图工具；prompt、Seed 批准门和尺寸约束照搬 |
-| 交付目录 | 成果放在持久且用户可访问的位置，每项目独立子目录 | `/mnt/agents/output/<项目名>/` | 项目工作目录 + 起本地 http 服务，把地址给用户 |
-| 版本快照 | 每轮结束留一个可回滚、可预览的版本 | `build_version`（type=html） | git commit 打 tag，或直接告知用户打开方式 |
-
-**网络依赖**：AI 生图必须联网；类型陌生、内部知识无把握或用户要求精确来源时联网核实，具体见 new-type.md。
-
-## 常见坑（必须避免）
-
-1. HTML 结尾必须写 `</body></html>`：缺失会导致按 `</body>` 定位的注入静默失效。
-2. 临时目录随时可能被清空（跨对话轮次即失效）：代码写完立即备份到持久工作区。
-3. 交付与快照的路径必须在持久存储上：放临时目录会让用户拿到 404 / 丢文件。
-4. 多个 `<script>` 块共享全局词法作用域：可跨块引用 const/let，但重名声明全崩。
-5. 浏览器截图工具传 url 会重新加载页面：动态画面用同步快进，不等时。
-6. 坐标系不混用：世界实体用世界坐标（渲染 `- camX`），HUD/界面用画布坐标；视野宽度一律 `VIEW_W` 不写死 `W`。
-7. 注入/替换前先断言目标字符串存在（如 `'</body>' in html`），替换静默失败最费调试时间。
-8. AI 生图服务偶发暂时错误：按当前工具建议退避重试；高分辨率不稳就先降档，不在失败状态并行连抽。
-9. shell 后台并行任务不要和 `cd`/`&&` 混用（任务会在错误目录执行）：用绝对路径。
-10. AI 透明素材角落常带"AI生成"水印：连通块清理（clean_sprite.py）；不透明背景图直接裁掉底部条带。
-11. AI 背景容易画出以假乱真的"假平台"：prompt 必须写 no platforms / no blocks。
-12. 类型不明的请求不要闷头按默认类型做（方向错了全部白做）：按询问门一次问清；但也别过度追问——能一轮问完的不分两轮。
-13. 验证运动/动画画面时，快进结束后要保持按键输入（如 `keys.ArrowRight = true`）：松键后角色会在截图前减速停下，拍到的永远是静止帧。
-14. AI 序列帧按**单动作整条生成**，禁止逐帧单独抽卡；先定 Seed，再跑 `build_sprite_edit_canvas.py` → 生图 → `normalize_sprite_strip.py` → `render_sprite_preview_sheet.py`，全条共用尺寸和 root anchor。
-15. root anchor 与交互 socket 不是一件事：脚底/身体根节点必须稳定，球、武器、手部等 socket 可随姿态移动并必须与物理事件对齐。循环动作另要求首尾闭环，事件动作要求起势—事件帧—收势可读。
-16. 手机网络下 10MB 级素材没有加载门，玩家会看到占位圆圈/素模——桌面本地截图永远测不出（本地秒载），必须从机制上保证"素材就绪才开局"。
-17. three.js 里 `traverse` 回调中给场景 add 节点（典型：给每个网格加描边壳）会无限递归栈溢出——先收集到数组，出来再统一处理。
-18. 手机整屏只剩底色、DOM HUD 却正常 = WebGL 上下文丢失/显存爆（不是逻辑 bug）：`setPixelRatio ≤1.5`、单张纹理 ≤1024、不透明大图一律 JPG、加 `webglcontextlost` 兜底重载。
-19. 给 GLB 模型手动配外部贴图必须 `flipY=false` 且（r147）`encoding=sRGBEncoding`，否则贴图颠倒或发灰——glTF 的 UV 原点与 three 默认相反。
-20. 手机 3D 必须有"静默蓝屏"防御三层（contextlost 监听 / 主循环 try-catch 计数 / drawcall 看门狗）+ 自动降级兼容模式，且 BUILD 版本号上屏——否则用户报"还是崩"时你连他跑的是哪个版本都不知道。
+1. `index.html` 必须闭合 `</body></html>`；替换前断言目标字符串存在。
+2. 世界实体使用世界坐标，HUD 使用画布坐标；镜头移动时不要重复叠加偏移。
+3. 图片和字体都进入加载门；加载失败要放行回退，不能卡在加载圈。
+4. 背景 prompt 禁止画假平台、假按钮或可交互物。
+5. 角色动作按单动作整条生成；不同动作可分开，但同一动作不得逐帧生成。
+6. 主角 Sprite 用可见像素框计算尺寸；透明画布尺寸不能当角色实际占屏尺寸。
+7. 机器人必须固定 `dt`、固定种子、有限循环和进程级超时。
+8. 审计失败先返回候选，再决定是否继续；不得为了拿 PASS 修改测试预期或删除失败证据。
+9. `window.__game.ready` 必须在状态机和测试接口建立后、资源成功或明确回退后变成严格布尔 `true`；相机 probe 使用 `x/y/zoom/targetX/targetY/targetZoom` 全名，不能另造 `tx/ty` 缩写。
+10. 玩法机器人使用真实 Chromium 通用 harness；禁止用同步 busy-wait、假 `Image`、假 Canvas 或临时 VM 复刻浏览器加载过程。

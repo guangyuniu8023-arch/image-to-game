@@ -9,11 +9,11 @@
 | 1 核心循环/输入 | 三车道换道、跳跃、滑铲和持续加速 | 受众、单局时长与任务目标 |
 | 2 机制/红线 | 动作—障碍判定链、刷怪公平性和性能红线 | 参数变化及牵连重推 |
 | 3 内容/进度 | 速度曲线、障碍/收集排列和无尽进度 | 教学、主题内容和阶段目标 |
-| 4 角色/视觉 | A 操作主体、程序化 IP 特征复刻和卡通渲染 | 原图特征、主题映射和视觉简报 |
+| 4 角色/视觉 | A 操作主体、reference Seed 贴图/模型材质和卡通渲染；程序化角色只作回退 | 原图特征、主题映射和视觉简报 |
 | 5 素材系统 | 3D 模型/贴图/程序化混合、尺寸与性能约束 | 实际资产清单、来源和回退 |
 | 6 Sprite/动画 | 3D 动作状态和程序化姿态，不套 2D 跑步帧 | 具体动作、触发和过渡 |
-| 7 HUD/UI | 生命、分数、速度/任务及标题结算需求 | 信息优先级、布局和 UI 四属性 |
-| 8 架构/验证 | three.js 分层架构、runner_bot 和手机防御 | 项目截图状态与有意偏差 |
+| 7 HUD/UI | 生命、分数、速度/任务及加载/结算需求 | 信息优先级、布局和 UI 四属性 |
+| 8 架构/验证 | three.js 分层架构、真实 Chromium 玩法合同和手机防御；runner_bot 仅作长时逻辑快测 | 项目截图状态与有意偏差 |
 
 ## 目录
 
@@ -22,7 +22,7 @@
 - 场景美术：地面贴图与密度三层
 - 外部 3D 素材库集成（GLB 模板化，推荐）
 - 程序化建模模式（兜底）
-- 程序化角色：IP 特征复刻（核心）
+- 参考角色 Seed 集成与程序化回退
 - 卡通渲染三件套（美术升级）
 - 竖屏锁定（3D 版）
 - 手机显存纪律与上下文丢失
@@ -119,11 +119,11 @@ function prepModel(name, gltf) {
 - **障碍建造器**：火车（盒组）、护栏（双柱+斜纹板）、横梁（双柱+梁+挂牌）
 - **网格生命周期**：`allMeshes` 注册表，syncWorld 每帧按数据集合增删网格——防止已回收障碍的"僵尸网格"泄漏
 
-## 程序化角色：IP 特征复刻（核心）
+## 参考角色 Seed 集成与程序化回退
 
 **何时用**：2D 抠图 sprite（纸片人）在 3D 世界里违和时——尤其跑酷相机在背后，正面 sprite 像"坐着倒滑"。
 
-**方法**：读图提取 IP 特征（主色、标志配饰、轮廓）→ 几何体拼装 → 程序化动画。**特征＞还原度**：配饰和配色对了就"像"，不追求解剖正确。
+正式主角必须先用上传图作 reference 生成游戏内 Seed，再把 Seed 用作纸片角色、模型材质或必要动作的身份锺。只有生图/模型资源加载失败时，才使用程序化回退：读图提取主色、标志配饰和轮廓，用几何体拼装并驱动程序化动画。回退必须在交付报告中标为 `fallback`，不得冒充正式角色。
 
 **参考素材：三视图生成策略**——单张上传图只有一个角度，复刻侧面/背面靠猜时，先以原图为参考图出一张 turnaround sheet 当复刻依据，prompt 骨架：
 `Character turnaround sheet: the SAME <角色一句话> in THREE views — front / side / back, identical proportions, full body, neutral standing pose, white background, flat lighting, no shadows` + IP 特征锁定（毛色/配饰/眼睛）。一次出 sheet 再裁三张，比分三张生成一致性好得多。
@@ -181,7 +181,7 @@ function layout() {
 
 ## 资源加载门（3D 版）
 
-纹理走 LoadingManager、DOM 图片（UI/标题图）用 Image 计数，**两路合并进度**，全部就绪才开局；加载中标题页显示进度条：
+纹理走 LoadingManager、DOM 图片（UI 图）用 Image 计数，**两路合并进度**；自然启动只显示代码加载页，全部资源成功或明确失败后调用 `newGame()` 自动开局：
 
 ```js
 const loadMgr = new THREE.LoadingManager();
@@ -192,13 +192,15 @@ const imgTotal = domAssets.length;
 function updateLoadingUI() {
   const done = texDone + imgDone, total = texTotal + imgTotal;
   assetsReady = done >= total;
-  /* 更新 #loadbar 宽度与 #loadtxt 文本；assetsReady 且标题页 → 重绘完整标题 */
+  /* 更新 #loadbar 宽度与 #loadtxt 文本；assetsReady 后只调用一次 newGame() */
 }
 loadMgr.onProgress = (u, d, t) => { texDone = d; texTotal = t; updateLoadingUI(); };
 loadMgr.onLoad = () => updateLoadingUI();
 for (const src of domAssets) { const im = new Image(); im.onload = im.onerror = () => { imgDone++; updateLoadingUI(); }; im.src = src; }
-function anyKey() { if (!assetsReady) return; /* ...原逻辑 */ }
+function anyKey() { if (!assetsReady) return; /* 这里只处理正式玩法输入，不负责开始游戏 */ }
 ```
+
+加载页不得依赖 DOM 图片、标题图或 AI 底材，不含开始按钮；加载期间输入不进入玩法。`newGame()` 完成首局初始化后设置 `window.__game.ready = true`，并隐藏加载页。
 
 注意：`new Image()` 不设 src 时 `complete` 为 true（测试时别用它模拟"未加载"）；机器人桩里让 Image 的 src setter 立即触发 onload。
 
@@ -219,7 +221,7 @@ function anyKey() { if (!assetsReady) return; /* ...原逻辑 */ }
 
 **兼容模式**（`localStorage.runner_safe=1`，渲染失败时自动写入并重载）：关 AA/阴影/描边、像素比 1。兼容模式仍失败 → 显示带 BUILD 号的错误页，**绝不静默蓝屏**。
 
-**BUILD 版本号上屏**（标题页角标）：用户报"还是丑/还是崩"时，先让截图里的 BUILD 号说话——确认用户跑的是不是最新版（预览链接/缓存会让用户一直玩旧版）。
+**BUILD 版本号上屏**（加载页与错误页角标）：用户报"还是丑/还是崩"时，先让截图里的 BUILD 号说话——确认用户跑的是不是最新版（预览链接/缓存会让用户一直玩旧版）。
 
 **"画布蓝屏但 DOM HUD 活着"的诊断顺序**：① GLB 数据体检（extensions/属性类型/interleaved，exotic 扩展在旧驱动上会崩）→ ② 连发模拟排逻辑/NaN → ③ 显存与上下文 → ④ 防御式降级。前三步都查不出时直接上 ④，别死磕远程复现。
 

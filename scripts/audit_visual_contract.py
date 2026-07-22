@@ -332,8 +332,6 @@ def audit(project: Path) -> tuple[dict[str, Any] | None, list[str]]:
             problems.append("the natural boot case must be cases[0] so it is captured before scripted mutation")
         if name != "boot":
             problems.append("the natural boot case name must be boot")
-        if state != "title":
-            problems.append("the natural boot case must end in title")
         if behavior != "static":
             problems.append("the natural boot case behavior must be static")
         if max_frames != 1:

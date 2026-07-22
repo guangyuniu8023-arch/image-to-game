@@ -161,7 +161,7 @@ const CHECK_C = 122;
 
 /* ================= 游戏状态 ================= */
 const G = {
-  state: "loading",    // loading | title | play | dead | win | gameover
+  state: "loading",    // loading | play | dead | win | gameover
   lives: 3, score: 0, bones: 0,
   camX: 0, time: 0, stateT: 0,
   checkpoint: false, muted: false, started: false,
@@ -187,7 +187,14 @@ function newGame() {
   buildLevel();
   G.lives = 3; G.score = 0; G.bones = 0; G.checkpoint = false;
   G.time = 0; resetPlayer(); player.inv = 0;
+  for (const code of Object.keys(keys)) keys[code] = false;
+  press.jump = false;
   G.state = "play"; G.stateT = 0;
+}
+
+function finishLoading() {
+  newGame();
+  if (window.__game) window.__game.ready = true;
 }
 </script>
 <script>
@@ -220,10 +227,12 @@ const sfx = {
 /* ================= 输入 ================= */
 const keys = {};
 const press = { jump: false };
+let gameplayAuditDriving = false, platformAuditLastKey = "", platformAuditDeathReason = "";
 addEventListener("keydown", e => {
   if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Space"].includes(e.code)) e.preventDefault();
   if (!keys[e.code] && ["ArrowUp","KeyW","Space"].includes(e.code)) press.jump = true;
   keys[e.code] = true;
+  if (gameplayAuditDriving) platformAuditLastKey = e.code;
   anyKey();
 });
 addEventListener("keyup", e => keys[e.code] = false);
@@ -242,9 +251,8 @@ bindBtn("btnL", "ArrowLeft"); bindBtn("btnR", "ArrowRight"); bindBtn("btnJ", "Sp
 
 function anyKey() {
   audio();
-  if (G.state === "title") { newGame(); }
-  else if (G.state === "gameover" || G.state === "win") {
-    if (G.stateT > 1.2) { G.state = "title"; }
+  if (G.state === "gameover" || G.state === "win") {
+    if (G.stateT > 1.2) newGame();
   }
 }
 
@@ -420,12 +428,12 @@ function updatePlay(dt) {
         p.vy = -520; G.score += 200; sfx.stomp();
         popups.push({x: e.x + e.w/2, y: e.y - 8, txt: "+200", t: 0});
         spawnDust(e.x + e.w/2, e.y + e.h, 8);
-      } else killPlayer();
+      } else killPlayer("enemy-contact");
     }
   }
 
   // 掉坑
-  if (p.y > ROWS * TILE + 40) killPlayer();
+  if (p.y > ROWS * TILE + 40) killPlayer("pit-fall");
 
   // 检查点
   if (!G.checkpoint && p.x > CHECK_C * TILE) {
@@ -444,8 +452,9 @@ function updatePlay(dt) {
   G.camX += (target - G.camX) * Math.min(1, dt*8);
 }
 
-function killPlayer() {
+function killPlayer(reason = "unknown") {
   if (G.state !== "play") return;
+  platformAuditDeathReason = reason;
   G.lives--; G.state = "dead"; G.stateT = 0; sfx.die();
   spawnDust(player.x + player.w/2, player.y + player.h/2, 14);
 }
@@ -872,7 +881,7 @@ function panel(title, starN) {
 function drawScreens() {
   if (G.state === "loading") {
     const done = assetsDone();
-    if (done >= ASSETS.length) { G.state = "title"; G.stateT = 0; return; }
+    if (done >= ASSETS.length) { finishLoading(); return; }
     ctx.fillStyle = "#57B8F0"; ctx.fillRect(0, 0, W, H);
     drawLogo("汪汪大冒险", W/2, H/2 - 110, 56);
     const bw = 340, bh = 28, bx = W/2 - bw/2, by = H/2 - 14;
@@ -884,27 +893,7 @@ function drawScreens() {
     ctx.fillText("加载中 " + done + " / " + ASSETS.length, W/2, by + 66);
     return;
   }
-  if (G.state === "title") {
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    drawLogo("汪汪大冒险", W/2, 168, 72);
-    ctx.fillStyle = "#FFF"; ctx.font = "21px Kenney, sans-serif";
-    ctx.globalAlpha = 0.95;
-    ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowOffsetY = 2; ctx.shadowBlur = 4;
-    ctx.fillText("P U P P Y  A D V E N T U R E", W/2, 232);
-    ctx.globalAlpha = 1; ctx.shadowOffsetY = 0; ctx.shadowBlur = 0;
-    drawStars(W/2, 296, 3, 34);
-    // 小狗登场
-    if (puppyImg.complete && puppyImg.naturalWidth) {
-      const bounce = Math.abs(Math.sin(G.time * 3)) * 14;
-      ctx.drawImage(puppyImg, W/2 - 85, 330 - bounce, 170, 195);
-    }
-    drawButton(W/2, 640, 252, "btn_red", "开始游戏", 26, true);
-    drawButton(W/2, 736, 196, "btn_green", "玩法说明", 19, false);
-    ctx.fillStyle = "rgba(62,39,35,.55)"; roundRect(W/2 - 220, 846, 440, 84, 16); ctx.fill();
-    ctx.fillStyle = "#FFF"; ctx.font = "bold 16px sans-serif";
-    ctx.fillText("← → 移动　 空格 / ↑ 跳跃", W/2, 874);
-    ctx.fillText("收集骨头 · 躲开猫咪 · 到达狗屋", W/2, 906);
-  } else if (G.state === "gameover") {
+  if (G.state === "gameover") {
     panel("游戏结束", Math.min(3, 1 + Math.floor(G.score / 3000)));
   } else if (G.state === "win") {
     panel("通关啦！", 3);
@@ -930,6 +919,136 @@ function render() {
   drawScreens();
 }
 
+/* ================= 标准运行时合同 ================= */
+const AUDIT_DT = 1 / 60;
+
+function withAuditSeed(seed, body) {
+  const originalRandom = Math.random;
+  let value = seed >>> 0;
+  Math.random = () => {
+    value = (Math.imul(value, 1664525) + 1013904223) >>> 0;
+    return value / 4294967296;
+  };
+  try { return body(); } finally { Math.random = originalRandom; }
+}
+
+function clearAuditKeys() {
+  for (const code of Object.keys(keys)) keys[code] = false;
+  press.jump = false;
+}
+
+let platformAuditSetup = {};
+
+function platformAuditReset(seed, setup) {
+  gameplayAuditDriving = true;
+  platformAuditSetup = setup && typeof setup === "object" ? setup : {};
+  platformAuditLastKey = "";
+  platformAuditDeathReason = "";
+  withAuditSeed(Number(seed) || 1, () => newGame());
+  clearAuditKeys();
+  const next = platformAuditSetup.player;
+  if (next && typeof next === "object") {
+    for (const key of ["x", "y", "vx", "vy", "coyote", "buffer", "inv"]) {
+      if (Number.isFinite(next[key])) player[key] = next[key];
+    }
+    if (typeof next.onGround === "boolean") player.onGround = next.onGround;
+  }
+  render();
+}
+
+function platformAuditStep(dt) {
+  update(Number(dt) || AUDIT_DT);
+  render();
+}
+
+function platformAuditSnapshot() {
+  let result = `running:${G.state}`;
+  let reason = "fixed-step-simulation-active";
+  let done = false;
+  if (G.state === "win") {
+    result = "win:goal"; reason = "flag-crossed-by-live-state-machine"; done = true;
+  } else if (G.state === "dead" || G.state === "gameover") {
+    result = `dead:${platformAuditDeathReason || "unknown"}`;
+    reason = `${platformAuditDeathReason || "unknown"}-triggered-killPlayer`; done = true;
+  } else if (platformAuditSetup.probe === "jump-gate" && platformAuditLastKey === "Space") {
+    if (player.vy < 0) {
+      result = "jumped:grounded"; reason = "grounded-jump-gate-open";
+    } else {
+      result = "ignored:airborne"; reason = "airborne-jump-gate-closed";
+    }
+    done = true;
+  }
+  return { state: G.state, position: { x: player.x, y: player.y }, result, reason, done };
+}
+
+function platformCameraTarget() {
+  return Math.max(0, Math.min(player.x + player.w / 2 - VIEW_W * 0.42, LEVEL_W - VIEW_W));
+}
+
+function platformVisualProbe() {
+  const image = imgReady(puppyImg) ? puppyImg : null;
+  const drawH = 62;
+  const drawW = image ? drawH * image.naturalWidth / image.naturalHeight : 48;
+  const centerX = (player.x - G.camX + player.w / 2) * ZOOM;
+  const bottomY = OFFY + (player.y + player.h) * ZOOM;
+  return {
+    state: G.state,
+    viewport: { width: W, height: H },
+    camera: {
+      x: G.camX * ZOOM,
+      y: 0,
+      zoom: ZOOM,
+      targetX: platformCameraTarget() * ZOOM,
+      targetY: 0,
+      targetZoom: ZOOM,
+    },
+    entities: {
+      player: {
+        basis: "visible-pixels",
+        render_source: image ? "template-sprite" : "fallback",
+        bounds: {
+          x: centerX - drawW * ZOOM / 2,
+          y: bottomY - drawH * ZOOM,
+          width: drawW * ZOOM,
+          height: drawH * ZOOM,
+        },
+      },
+      route: {
+        basis: "geometry",
+        render_source: "runtime-tiles",
+        bounds: { x: 0, y: OFFY + 10 * TILE * ZOOM, width: W, height: TILE * ZOOM },
+      },
+    },
+    hud: [{ bounds: { x: 0, y: 0, width: W, height: 80 } }],
+  };
+}
+
+function platformVisualCase(name) {
+  if (name !== "running-settled") throw new Error("unknown visual audit case: " + name);
+  return withAuditSeed(24051986, () => {
+    newGame(); clearAuditKeys();
+    keys.ArrowRight = true;
+    for (let frame = 0; frame < 90; frame++) update(AUDIT_DT);
+    keys.ArrowRight = false;
+    for (let frame = 0; frame < 150; frame++) update(AUDIT_DT);
+    render();
+    return { samples: [platformVisualProbe()] };
+  });
+}
+
+window.__game = {
+  ready: false,
+  gameplayAudit: {
+    reset: platformAuditReset,
+    step: platformAuditStep,
+    snapshot: platformAuditSnapshot,
+  },
+  visualAudit: {
+    snapshot() { return { samples: [platformVisualProbe()] }; },
+    runCase: platformVisualCase,
+  },
+};
+
 /* ================= 主循环 ================= */
 buildLevel();
 resetPlayer(); player.inv = 0;
@@ -937,7 +1056,7 @@ let last = performance.now();
 function loop(now) {
   let dt = (now - last) / 1000; last = now;
   if (dt > 1/30) dt = 1/30;
-  update(dt);
+  if (!gameplayAuditDriving) update(dt);
   render();
   requestAnimationFrame(loop);
 }
